@@ -62,12 +62,8 @@ pub fn migrate_legacy_keys(storage: &mut dyn eframe::Storage) {
 #[cfg(desktop)]
 pub const SOUND_MODES: [(u8, &str); 2] = [(0, "STANDARD"), (1, "MULTITRACK")];
 #[cfg(target_os = "android")]
-pub const SOUND_MODES: [(u8, &str); 4] = [
-    (3, "NATIVE"),
-    (1, "FAST"),
-    (0, "SAFE"),
-    (2, "ULTRA SAFE"),
-];
+pub const SOUND_MODES: [(u8, &str); 4] =
+    [(3, "NATIVE"), (1, "FAST"), (0, "SAFE"), (2, "ULTRA SAFE")];
 #[cfg(all(not(desktop), not(target_os = "android")))]
 pub const SOUND_MODES: [(u8, &str); 1] = [(3, "NATIVE")];
 

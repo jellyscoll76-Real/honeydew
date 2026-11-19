@@ -238,7 +238,7 @@ const fn row(label: &'static str, kind: Kind) -> Row {
 }
 
 /// Every row of the SETTINGS tab, in order.
-const ROWS: [Row; 54] = {
+const ROWS: [Row; 53] = {
     use Kind::*;
     [
         row("MIDI:", Header),
