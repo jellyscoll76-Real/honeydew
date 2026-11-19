@@ -61,12 +61,18 @@ pub fn migrate_legacy_keys(storage: &mut dyn eframe::Storage) {
 /// driver modes `Standard` and `Multitrack` instead.
 #[cfg(desktop)]
 pub const SOUND_MODES: [(u8, &str); 2] = [(0, "STANDARD"), (1, "MULTITRACK")];
-#[cfg(not(desktop))]
+#[cfg(target_os = "android")]
+pub const SOUND_MODES: [(u8, &str); 4] = [
+    (3, "NATIVE"),
+    (1, "FAST"),
+    (0, "SAFE"),
+    (2, "ULTRA SAFE"),
+];
+#[cfg(all(not(desktop), not(target_os = "android")))]
 pub const SOUND_MODES: [(u8, &str); 1] = [(3, "NATIVE")];
 
-/// Buffer-size slider positions. Zero keeps the audio device's native/default buffer;
-/// positive values are targets that the backend clamps to the device's supported range.
-pub const BUFFER_SIZES: [u32; 7] = [0, 64, 128, 256, 512, 1024, 2048];
+/// Legacy buffer-size slider positions, kept only to read older settings files. Active audio uses `sound_mode`.
+const LEGACY_BUFFER_SIZES: [u32; 7] = [0, 64, 128, 256, 512, 1024, 2048];
 pub const MCP_DEFAULT_PORT: u16 = 57831;
 
 #[cfg(desktop)]
@@ -147,7 +153,7 @@ pub struct Settings {
     pub mcp_port: u16,
     #[serde(skip)]
     pub mcp_token: String,
-    /// The selected output buffer target: an index into [`BUFFER_SIZES`]. Zero keeps the device default.
+    /// Deprecated buffer-slider value retained only for storage compatibility; `sound_mode` now controls audio policy.
     #[serde(rename = "lowlatency")]
     pub low_latency: u8,
     /// `Enable background audio (iOS Only)`. Stored for the iOS build; disabled elsewhere.
@@ -483,7 +489,7 @@ impl Settings {
         s.ui_scale = s
             .ui_scale
             .clamp(*UI_SCALE_RANGE.start(), *UI_SCALE_RANGE.end());
-        s.low_latency = s.low_latency.min((BUFFER_SIZES.len() - 1) as u8);
+        s.low_latency = s.low_latency.min((LEGACY_BUFFER_SIZES.len() - 1) as u8);
         if !SOUND_MODES.iter().any(|&(id, _)| id == s.sound_mode) {
             s.sound_mode = d.sound_mode;
         }

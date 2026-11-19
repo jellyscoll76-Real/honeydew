@@ -1042,9 +1042,9 @@ fn output_config(
     else {
         if cfg!(target_os = "android") {
             let frames = match mode {
-                BufferMode::UltraSafe => Some(1024),
-                BufferMode::Safe => Some(512),
-                BufferMode::Fast => Some(192),
+                BufferMode::UltraSafe => Some(2048),
+                BufferMode::Safe => Some(1024),
+                BufferMode::Fast => Some(256),
                 BufferMode::Fixed(frames) => Some(frames),
                 BufferMode::Native => None,
             };
@@ -1055,9 +1055,9 @@ fn output_config(
         return config;
     };
     let frames = match mode {
-        BufferMode::UltraSafe => max,
-        BufferMode::Safe => 256.clamp(min, max),
-        BufferMode::Fast => min,
+        BufferMode::UltraSafe => 2048.clamp(min, max),
+        BufferMode::Safe => 1024.clamp(min, max),
+        BufferMode::Fast => 256.clamp(min, max),
         BufferMode::Fixed(target) => target.clamp(min, max),
         BufferMode::Native => return config,
     };

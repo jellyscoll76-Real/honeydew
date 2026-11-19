@@ -65,7 +65,7 @@ use eframe::egui::{
 use crate::icons::{IconId, draw_icon};
 use crate::metrics::{FontSize, UI_SCALE_RANGE};
 use crate::midi::device::menu as midi_menu;
-use crate::settings::{BUFFER_SIZES, SOUND_MODES, Settings};
+use crate::settings::{SOUND_MODES, Settings};
 use crate::theme::{DISABLED_ALPHA, Theme, builtin_themes};
 use crate::ui::popup::{self, PopupItem};
 use crate::ui::scroller::Scroller;
@@ -139,8 +139,6 @@ enum Kind {
     Header,
     /// A toggle bound to a setting.
     Toggle(fn(&mut Settings) -> &mut bool),
-    /// The output buffer target slider, with a native/default position at zero.
-    BufferSize,
     McpPort,
     McpToken,
     McpStatus,
@@ -256,7 +254,6 @@ const ROWS: [Row; 54] = {
         row("Scan Bluetooth MIDI Devices", Scan),
         row("Audio:", Header),
         row("Multi core processing", Toggle(|s| &mut s.multi_core)),
-        row("Audio buffer size", BufferSize),
         row(
             "Enable background audio (iOS Only)",
             if cfg!(target_os = "ios") {
@@ -411,8 +408,6 @@ pub struct SettingsTab {
     pub orientation: bool,
     /// `Scaling:`'s slider position (0 = 60 %, 1 = 200 %) while it is held: shown, applied when let go.
     scaling: Option<f32>,
-    /// The audio buffer slider position while it is held: shown, applied when let go so the stream is reopened once.
-    buffer_size: Option<f32>,
     mcp_status: &'static str,
     /// A new scale was applied: the next frame, at the new `U`, scrolls `Scaling:` back into view.
     reveal_scaling: bool,
@@ -644,7 +639,7 @@ impl SettingsTab {
         let (m, colors) = (cx.m, &cx.theme.colors);
         // Headers and the metronome row take the whole slot; the other rows are a control row, centred in it.
         let r = match row.kind {
-            Kind::Header | Kind::Level | Kind::Scaling | Kind::BufferSize => slot,
+            Kind::Header | Kind::Level | Kind::Scaling => slot,
             _ => Rect::from_center_size(slot.center(), vec2(slot.width(), m.u(ROW_H))),
         };
         let text = colors.text.to_color32();
@@ -796,9 +791,11 @@ impl SettingsTab {
                 }
                 if matches!(choice, Choice::SoundMode) {
                     #[cfg(desktop)]
-                    let sound_mode_tip = "STANDARD: general-purpose mode with broad device compatibility.\nMULTITRACK: experimental; FL-style per-input multitrack routing is not implemented yet. The buffer slider works in either mode.";
-                    #[cfg(not(desktop))]
-                    let sound_mode_tip = "ULTRASAFE: largest buffer; maximum stability and compatibility, highest latency.\nSAFE: moderately large buffer; fewer glitches with more latency.\nFAST: small buffer; lower latency but more CPU/dropout risk.\nNATIVE: device/OS default audio behavior.";
+                    let sound_mode_tip = "STANDARD: general-purpose mode with broad device compatibility.\nMULTITRACK: experimental; FL-style per-input multitrack routing is not implemented yet.";
+                    #[cfg(target_os = "android")]
+                    let sound_mode_tip = "NATIVE: Android's device-default low-latency path and burst size.\nFAST: about 256 frames for responsive playback.\nSAFE: about 1024 frames for better underrun resistance.\nULTRA SAFE: about 2048 frames for the most stability and highest latency. Device support may clamp these targets.";
+                    #[cfg(all(not(desktop), not(target_os = "android")))]
+                    let sound_mode_tip = "NATIVE: device/OS default audio behavior.";
                     crate::ui::tooltip::tip(ui, button_rect, sound_mode_tip, None);
                 }
                 if matches!(choice, Choice::SampleMemory) {
@@ -850,45 +847,6 @@ impl SettingsTab {
                 );
                 let c = level_control(id, body, text);
                 h_slider(ui, cx, &c, &mut s.metronome_level, |_| String::new());
-            }
-            Kind::BufferSize => {
-                let (line, body) = r.split_top_bottom_at_y(r.top() + m.u(LEVEL_LABEL_H));
-                let (room, value_room) =
-                    line.split_left_right_at_x(line.right() - m.u(PERCENT_W + 2.5));
-                label(ui, room, FontSize::Pt10);
-                let max = (BUFFER_SIZES.len() - 1) as f32;
-                let stored = f32::from(s.low_latency.min((BUFFER_SIZES.len() - 1) as u8)) / max;
-                let mut value = self.buffer_size.unwrap_or(stored);
-                let c = Control {
-                    bipolar: false,
-                    menu: ParamMenu::Unbound,
-                    ..Control::new(id, body, "", text, 0.0)
-                };
-                let response = h_slider(ui, cx, &c, &mut value, |_| String::new());
-                if response.is_pointer_button_down_on() {
-                    self.buffer_size = Some(value);
-                } else if self.buffer_size.take().is_some() || value != stored {
-                    s.low_latency = (value.clamp(0.0, 1.0) * max).round() as u8;
-                }
-                let index = (value.clamp(0.0, 1.0) * max).round() as usize;
-                let display = if index == 0 {
-                    "Native".to_owned()
-                } else {
-                    format!("{} frames", BUFFER_SIZES[index])
-                };
-                plain(
-                    ui,
-                    value_room,
-                    &display,
-                    FontSize::Pt10,
-                    Align2::RIGHT_CENTER,
-                );
-                crate::ui::tooltip::tip(
-                    ui,
-                    r,
-                    "Chooses the output buffer target. Native uses the device default; smaller frame sizes reduce latency but increase CPU and dropout risk. The setting works independently of Sound Mode.",
-                    None,
-                );
             }
             Kind::McpPort => {
                 label(ui, before(button_rect), FontSize::Pt10);
@@ -1379,7 +1337,6 @@ mod tests {
                 "Scan Bluetooth MIDI Devices",
                 "Audio:",
                 "Multi core processing",
-                "Audio buffer size",
                 "Enable background audio (iOS Only)",
                 "Sound mode:",
                 "Sample memory limit:",
@@ -1475,8 +1432,15 @@ mod tests {
             assert_eq!(labels(Choice::SoundMode), ["STANDARD", "MULTITRACK"]);
             assert_eq!(values(Choice::SoundMode), [0, 1]);
         }
-        #[cfg(not(desktop))]
-        #[cfg(not(desktop))]
+        #[cfg(target_os = "android")]
+        {
+            assert_eq!(
+                labels(Choice::SoundMode),
+                ["NATIVE", "FAST", "SAFE", "ULTRA SAFE"]
+            );
+            assert_eq!(values(Choice::SoundMode), [3, 1, 0, 2]);
+        }
+        #[cfg(all(not(desktop), not(target_os = "android")))]
         {
             assert_eq!(labels(Choice::SoundMode), ["NATIVE"]);
             assert_eq!(values(Choice::SoundMode), [3]);
@@ -1525,7 +1489,17 @@ mod tests {
             assert_eq!(Choice::SoundMode.label(&s), label);
             assert_eq!(SOUND_MODES, [(0, "STANDARD"), (1, "MULTITRACK")]);
         }
-        #[cfg(not(desktop))]
+        #[cfg(target_os = "android")]
+        assert_eq!(
+            SOUND_MODES,
+            [
+                (3, "NATIVE"),
+                (1, "FAST"),
+                (0, "SAFE"),
+                (2, "ULTRA SAFE")
+            ]
+        );
+        #[cfg(all(not(desktop), not(target_os = "android")))]
         assert_eq!(SOUND_MODES, [(3, "NATIVE")]);
     }
 
@@ -1947,15 +1921,11 @@ mod tests {
             // Three rows in a section, then a dropdown and the next header's toggle: one pitch each.
             let first = centre("Multi core processing");
             assert!(
-                (centre("Audio buffer size") - first - 2.5 * u).abs() < 0.01,
+                (centre("Enable background audio (iOS Only)") - first - 2.0 * u).abs() < 0.01,
                 "{at}"
             );
             assert!(
-                (centre("Enable background audio (iOS Only)") - first - 4.0 * u).abs() < 0.01,
-                "{at}"
-            );
-            assert!(
-                (centre("Sound mode:") - first - 6.0 * u).abs() < 0.01,
+                (centre("Sound mode:") - first - 4.0 * u).abs() < 0.01,
                 "{at}"
             );
             for label in ["Multi core processing", "Sound mode:", "Input device:"] {

@@ -139,23 +139,18 @@ pub fn open_device_with_mode(
     }
 }
 
-pub fn buffer_mode(sound_mode: u8, low_latency: u8) -> BufferMode {
-    let target = crate::settings::BUFFER_SIZES
-        .get(usize::from(low_latency))
-        .copied()
-        .unwrap_or_else(|| *crate::settings::BUFFER_SIZES.last().unwrap());
-    let requested = (target > 0).then_some(BufferMode::Fixed(target));
-    // The explicit buffer target is independent of the desktop Sound Mode. Native keeps
-    // the device default; a selected target is applied in either Standard or Multitrack.
+pub fn buffer_mode(sound_mode: u8, _legacy_buffer_target: u8) -> BufferMode {
+    // Desktop's Standard/Multitrack choices do not change its output buffer. The old raw buffer slider is ignored;
+    // mobile audio is controlled by the named profiles instead.
     if cfg!(desktop) {
-        return requested.unwrap_or(BufferMode::Native);
+        return BufferMode::Native;
     }
-    requested.unwrap_or(match sound_mode {
+    match sound_mode {
         2 => BufferMode::UltraSafe,
         0 => BufferMode::Safe,
         1 => BufferMode::Fast,
         _ => BufferMode::Native,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -1220,6 +1215,18 @@ mod tests {
     use super::*;
     use crate::flm::chunk::ContentPath;
     use crate::song::{ChannelKind, SynthKind};
+
+    #[test]
+    fn sound_modes_select_named_mobile_buffers_and_ignore_legacy_slider_values() {
+        if cfg!(target_os = "android") {
+            assert_eq!(buffer_mode(3, 6), BufferMode::Native);
+            assert_eq!(buffer_mode(1, 6), BufferMode::Fast);
+            assert_eq!(buffer_mode(0, 6), BufferMode::Safe);
+            assert_eq!(buffer_mode(2, 6), BufferMode::UltraSafe);
+        } else {
+            assert_eq!(buffer_mode(0, 6), BufferMode::Native);
+        }
+    }
 
     /// The link keeps MIDI CCs 0 to 127 (params 7 to 133), not Pitch Bend (4) or channel pressure (5), which a re-sync
     /// and Stop reset.

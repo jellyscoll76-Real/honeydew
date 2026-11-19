@@ -46,7 +46,7 @@ use crate::song::{
 };
 use crate::theme::{Rgba, Theme, ThemeColors, channel_color};
 use crate::ui::audio_editor::{
-    self, Action, Wave, add_column, columns, stretch_of, stretch_ratio, wave_rows,
+    self, Action, Wave, column_span, columns, stretch_of, stretch_ratio, wave_rows,
 };
 use crate::ui::automation::pop_scale;
 use crate::ui::buttons::bubble_button;
@@ -201,6 +201,8 @@ const FRAME_ALPHA: f32 = 0.3;
 const TINT_MID: f32 = 0.66;
 /// An automation miniature and an audio waveform sample the tint here.
 const CURVE_TINT: f32 = 0.8;
+/// Switch dense note miniatures to pixel-grid rendering once a view would otherwise visit this many event plays.
+const MINIATURE_LOD_PLAYS: f64 = 512.0;
 
 /// Song ticks to x and back. `origin` is the x of tick 0 (left of the grid once scrolled).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2336,13 +2338,25 @@ fn audio_wave(
     (wave.per_beat > 0.0 && wave.per_beat.is_finite()).then_some((source, wave))
 }
 
-/// An audio clip's waveform in `area` in `ink`, by the audio editor's laws (a column a device pixel from min/max peaks,
-/// mono centred at h/2 with scale h/2, stereo in halves, a column under a pixel a pixel line, a reversed sample
-/// mirrored, Speed and a SYNC stretch in the scale): each loop pass from its start, up to the sample's end or the
-/// loop's, as the notes repeat. A loop narrower than a pixel draws nothing.
-/// A column reads the sample's summary where it covers whole blocks ([`columns`]), so it costs at most 2·256 frames.
-// ponytail: each frame re-scans every column's two partial ends, about 1 ms per channel per visible track; a per-clip
-// column cache (keyed by zoom and scroll) or a 16-frame second summary level if that shows up in a profile.
+/// The waveform sampling stride in device pixels: retain one min/max sample per pixel when zoomed in, and use wider
+/// peak bins in overview views where each pixel already represents at least a beat.
+fn waveform_stride(beats_per_px: f64) -> usize {
+    if beats_per_px <= 1.0 {
+        1
+    } else if beats_per_px <= 2.0 {
+        2
+    } else if beats_per_px <= 4.0 {
+        4
+    } else {
+        8
+    }
+}
+
+/// An audio clip's waveform in `area` in `ink`, by the audio editor's laws (min/max peaks, mono centred at h/2 with
+/// scale h/2, stereo in halves, a reversed sample mirrored, Speed and SYNC stretch in the scale): each loop pass from
+/// its start, up to the sample's end or the loop's, as the notes repeat. A loop narrower than a pixel draws nothing.
+/// Close views retain one column per device pixel; overview views combine aligned 2–8 pixel peak bins. A bin reads the
+/// sample's summary where it covers whole blocks ([`columns`]), so it costs at most 2·256 frames.
 fn waveform(
     painter: &Painter,
     clip: &Clip,
@@ -2357,6 +2371,9 @@ fn waveform(
     let Some(lp) = clip.loop_ticks().filter(|&lp| lp >= beats_per_px * ppq) else {
         return;
     };
+    let stride = waveform_stride(beats_per_px);
+    let bin_px = px * stride as f32;
+    let beats_per_bin = beats_per_px * stride as f64;
     // Pass k's content starts at base + k·loop; pass 0 is the one the clip starts in (at its offset).
     let start = f64::from(clip.start_tick);
     let base = start - (clip.offset_beats * ppq).rem_euclid(lp);
@@ -2367,23 +2384,27 @@ fn waveform(
     let rows = wave_rows(area, source.summary.len() > 1);
     let passes =
         ((from - base) / lp).floor().max(0.0) as u64..((to - base) / lp).ceil().max(0.0) as u64;
+    let mut mesh = Mesh::default();
     for k in passes {
         let at = base + k as f64 * lp;
         let (a, b) = (at.max(from), (at + sound).min(to));
         if b <= a {
             continue;
         }
-        let x0 = (axis.x(a) / px).floor() * px;
-        let width = ((axis.x(b) - x0) / px).ceil() as usize;
+        let x0 = (axis.x(a) / bin_px).floor() * bin_px;
+        let width = ((axis.x(b) - x0) / bin_px).ceil() as usize;
         let left = (axis.tick(x0) - at) / ppq;
-        let span = ((left, beats_per_px), (x0, width));
-        painter.add(wave_mesh(source, wave, &rows, span, px, ink));
+        let span = ((left, beats_per_bin), (x0, width));
+        wave_mesh_into(&mut mesh, source, wave, &rows, span, (bin_px, px), ink);
+    }
+    if !mesh.indices.is_empty() {
+        painter.add(mesh);
     }
 }
 
-/// The waveform's columns: `width` device-pixel columns (`px` wide) from `x0`, the first at content beat `left` and
-/// each `beats_per_px` on, of every channel ([`columns`]) about its row of `rows` ([`wave_rows`]), in `ink`. The sample
-/// strip draws its whole file with them too (Honeydew change, #124).
+/// The waveform's peak bins: `width` columns (`px` wide) from `x0`, the first at content beat `left` and each
+/// `beats_per_px` on, of every channel ([`columns`]) about its row of `rows` ([`wave_rows`]), in `ink`. The playlist may
+/// widen bins for overview zoom; the sample strip draws its whole file at full pixel resolution (Honeydew change, #124).
 pub(crate) fn wave_mesh(
     source: &Waveform,
     wave: Wave,
@@ -2393,13 +2414,38 @@ pub(crate) fn wave_mesh(
     ink: Color32,
 ) -> Mesh {
     let mut mesh = Mesh::default();
+    wave_mesh_into(
+        &mut mesh,
+        source,
+        wave,
+        rows,
+        ((left, beats_per_px), (x0, width)),
+        (px, px),
+        ink,
+    );
+    mesh
+}
+
+fn wave_mesh_into(
+    mesh: &mut Mesh,
+    source: &Waveform,
+    wave: Wave,
+    rows: &[(f32, f32)],
+    ((left, beats_per_px), (x0, width)): ((f64, f64), (f32, usize)),
+    (bin_px, device_px): (f32, f32),
+    ink: Color32,
+) {
     for ((samples, summary), &row) in source.channels().zip(rows) {
         let cols = columns(samples, summary, wave, left, beats_per_px, width);
-        for (i, peak) in cols.into_iter().enumerate() {
-            add_column(&mut mesh, x0 + i as f32 * px, peak, row, px, ink);
+        for (i, (lo, hi)) in cols.into_iter().enumerate() {
+            let y = column_span(lo, hi, row.0, row.1, device_px);
+            let x = x0 + i as f32 * bin_px;
+            mesh.add_colored_rect(
+                Rect::from_x_y_ranges(x..=x + bin_px, y),
+                ink,
+            );
         }
     }
-    mesh
 }
 
 /// `a` moved `t` of the way toward `b`, opaque.
@@ -2497,6 +2543,67 @@ fn notes(
     let p = area.height() / (f32::from(hi - lo) + 2.0);
     let base = start - (clip.offset_beats * f64::from(PPQ)).rem_euclid(lp);
     let px_ticks = f64::from(px / axis.beat_w) * f64::from(PPQ);
+    // At overview zoom, a loop can still yield thousands of individual note rectangles even though they resolve to
+    // the same handful of screen pixels. Keep the event walk bounded as before, but rasterize dense views into a
+    // device-pixel grid and submit them as one mesh. The cell keeps the strongest velocity; at closer zooms the exact
+    // note geometry and layering below are unchanged.
+    let dense_overview = px_ticks >= 1.0
+        && lp > 0.0
+        && clip.events.len() as f64 * (to - from).max(0.0) / lp >= MINIATURE_LOD_PLAYS;
+    if dense_overview {
+        let seen = painter.clip_rect();
+        let first_col = (seen.left() / px).floor() as i64;
+        let end_col = (seen.right() / px).ceil() as i64;
+        let cols = end_col.saturating_sub(first_col).max(0) as usize;
+        let keys = usize::from(hi - lo) + 1;
+        let Some(cell_count) = cols.checked_mul(keys) else {
+            return;
+        };
+        let mut pixels = vec![0_u16; cell_count];
+        for (tick, event) in clip.plays_to_draw(from as u64, to.max(from) as u64, px_ticks) {
+            let Some((len, key, velocity)) = note(event) else {
+                continue;
+            };
+            let tick = tick as f64;
+            let end = base + (((tick - base) / lp).floor() + 1.0) * lp;
+            let x = m.floor_px(axis.x(tick));
+            let right = (x + width(len)).min(m.floor_px(axis.x(end)));
+            let key_index = usize::from(key - lo);
+            let a = ((x / px).floor() as i64 - first_col).clamp(0, cols as i64) as usize;
+            let b = ((right / px).ceil() as i64 - first_col).clamp(0, cols as i64) as usize;
+            for col in a..b {
+                let cell = &mut pixels[col * keys + key_index];
+                *cell = (*cell).max(u16::from(velocity) + 1);
+            }
+        }
+        let mut mesh = Mesh::default();
+        for key_index in 0..keys {
+            let key = lo + key_index as u8;
+            let y = m.floor_px(area.bottom() - t - (f32::from(key) - f32::from(lo) + 1.0) * p);
+            let mut col = 0;
+            while col < cols {
+                let velocity = pixels[col * keys + key_index];
+                if velocity == 0 {
+                    col += 1;
+                    continue;
+                }
+                let first = col;
+                col += 1;
+                while col < cols && pixels[col * keys + key_index] == velocity {
+                    col += 1;
+                }
+                let x = (first_col + first as i64) as f32 * px;
+                mesh.add_colored_rect(
+                    Rect::from_min_size(pos2(x, y), vec2((col - first) as f32 * px, t)),
+                    ink((velocity - 1) as u8),
+                );
+            }
+        }
+        if !mesh.indices.is_empty() {
+            painter.add(mesh);
+        }
+        return;
+    }
     // Per key, how far right its drawn notes reach. The plays come in time order, so a note that ends there too lies
     // within one already drawn: a dense clip zoomed out draws a few rects a row, not every note.
     let mut drawn = vec![f32::NEG_INFINITY; usize::from(hi - lo) + 1];
@@ -4944,9 +5051,15 @@ mod tests {
                 });
             });
             let fills = (out.shapes.iter())
-                .filter_map(|c| match &c.shape {
-                    egui::Shape::Rect(r) if r.fill == Color32::RED => Some(r.rect),
-                    _ => None,
+                .flat_map(|c| match &c.shape {
+                    egui::Shape::Rect(r) if r.fill == Color32::RED => vec![r.rect],
+                    egui::Shape::Mesh(mesh) => mesh
+                        .vertices
+                        .chunks_exact(4)
+                        .filter(|quad| quad[0].color == Color32::RED)
+                        .map(|quad| Rect::from_two_pos(quad[0].pos, quad[3].pos))
+                        .collect(),
+                    _ => Vec::new(),
                 })
                 .collect();
             let _ = tx.send(fills);
@@ -5055,6 +5168,15 @@ mod tests {
         let clip = &mut lane.clips[0];
         clip.loop_len_beats = 1e-9;
         assert!(!loops(clip));
+    }
+
+    #[test]
+    fn waveform_peak_bins_get_coarser_only_at_wide_overview_zooms() {
+        assert_eq!(waveform_stride(0.25), 1);
+        assert_eq!(waveform_stride(1.0), 1);
+        assert_eq!(waveform_stride(1.5), 2);
+        assert_eq!(waveform_stride(3.0), 4);
+        assert_eq!(waveform_stride(8.0), 8);
     }
 
     #[test]
