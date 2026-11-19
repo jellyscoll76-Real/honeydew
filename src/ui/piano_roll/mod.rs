@@ -960,8 +960,13 @@ impl PianoRoll {
         let g = self.geom(grid.min, u);
         let vocal_consumed = self.vocal_input(ui, &response, &g, song, &mut actions);
         #[cfg(target_os = "android")]
-        let locked = song.channels.get(self.channel).zip(self.clip_id)
-            .is_some_and(|(ch, id)| crate::app::rooms::locked_clip(ui.ctx()) == Some((ch.id, self.lane, id)));
+        let locked = song
+            .channels
+            .get(self.channel)
+            .zip(self.clip_id)
+            .is_some_and(|(ch, id)| {
+                crate::app::rooms::locked_clip(ui.ctx()) == Some((ch.id, self.lane, id))
+            });
         #[cfg(not(target_os = "android"))]
         let locked = false;
         if !vocal_consumed && (!locked || !matches!(self.gesture, Gesture::Idle)) {

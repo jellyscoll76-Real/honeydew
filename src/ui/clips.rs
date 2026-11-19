@@ -1519,7 +1519,7 @@ impl Clips {
 
     /// The clips a drag under way has edited, each as the drag found it and where it is now (a clip moved to another
     /// track has another [`ClipRef`] there). Empty until the drag edits.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
     pub(crate) fn dragging(&self) -> Vec<(ClipRef, ClipRef)> {
         let Some(drag) = self.drag.as_ref().filter(|d| d.edited) else {
             return Vec::new();

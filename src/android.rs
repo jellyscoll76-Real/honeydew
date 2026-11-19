@@ -704,10 +704,10 @@ pub(crate) fn room_open(endpoint: &str, route: &str, name: &str, token: &str) ->
                 "roomOpen",
                 "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
                 &[
-                    endpoint.as_ref().into(),
-                    route.as_ref().into(),
-                    name.as_ref().into(),
-                    token.as_ref().into(),
+                    jni::objects::JValue::Object(endpoint.as_ref()),
+                    jni::objects::JValue::Object(route.as_ref()),
+                    jni::objects::JValue::Object(name.as_ref()),
+                    jni::objects::JValue::Object(token.as_ref()),
                 ],
             )?
             .z()?;
@@ -725,7 +725,7 @@ pub(crate) fn room_send(message: &str) -> bool {
                 activity,
                 "roomSend",
                 "(Ljava/lang/String;)Z",
-                &[message.as_ref().into()],
+                &[jni::objects::JValue::Object(message.as_ref())],
             )?
             .z()?;
         Ok(())

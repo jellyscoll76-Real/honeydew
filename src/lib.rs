@@ -7,7 +7,7 @@ pub mod app;
 pub mod audio_bridge;
 pub mod audio_engine;
 pub mod audio_link;
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(target_arch = "wasm32", target_os = "android", test))]
 pub mod collaboration;
 pub mod content;
 pub mod flm;
