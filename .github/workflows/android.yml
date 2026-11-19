@@ -32,6 +32,15 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        if: ${{ github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/arena/') }}
+      - uses: actions/checkout@v4
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/arena/') }}
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/sounds/*
+            /sounds/release.txt
       - uses: dtolnay/rust-toolchain@1.91.0
         with:
           targets: aarch64-linux-android, armv7-linux-androideabi
@@ -88,6 +97,7 @@ jobs:
           ABI_MODE: ${{ inputs.abi || 'all' }}
           INCLUDE_SOUNDS: ${{ inputs.include_sounds || 'false' }}
         run: |
+          export CARGO_TERM_COLOR=never
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108"
           args=(--release --abi "$ABI_MODE")
           # A debug application ID lets the preview coexist with the installed release.
