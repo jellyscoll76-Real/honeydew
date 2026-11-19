@@ -365,6 +365,8 @@ pub struct ProjectFiles {
     /// The save under way: the path it asked for, its bytes for the library's copy (where it keeps copies), the
     /// song as written (stamped), whose stamp the song takes once it is done, and whether it is a `Send`.
     saving: Option<(PathBuf, Option<Vec<u8>>, Song, bool)>,
+    #[cfg(target_os = "android")]
+    room_guest: bool,
     /// Counts the saves and copies: SONGS reads its folder again when it changes.
     library_changes: u64,
     /// The song's file. `None`: untitled, and `Ctrl+S` asks.
@@ -532,6 +534,8 @@ impl ProjectFiles {
             factory: crate::content::factory(),
             copies: true,
             saving: None,
+            #[cfg(target_os = "android")]
+            room_guest: false,
             library_changes: 0,
             path: None,
             dir: None,
@@ -609,7 +613,10 @@ impl ProjectFiles {
             self.voicebanks_loaded = true;
             let manifest = self
                 .user_dir()
-                .map_or_else(|| PathBuf::from(VOICEBANKS_FOLDER), |user| user.join(VOICEBANKS_FOLDER))
+                .map_or_else(
+                    || PathBuf::from(VOICEBANKS_FOLDER),
+                    |user| user.join(VOICEBANKS_FOLDER),
+                )
                 .join("index.json");
             if let Ok(bytes) = self.read_user_file(&manifest)
                 && let Ok(index) = serde_json::from_slice(&bytes)
@@ -918,6 +925,25 @@ impl ProjectFiles {
         }
     }
 
+    #[cfg(target_os = "android")]
+    pub(crate) fn room_detach(&mut self) {
+        self.path = None;
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn room_guest(&mut self, guest: bool) {
+        self.room_guest = guest;
+    }
+
+    #[cfg(target_os = "android")]
+    fn room_blocks_export(&mut self) -> bool {
+        if !self.room_guest {
+            return false;
+        }
+        self.save_failed("Only the host can save or export the room project.".into());
+        true
+    }
+
     /// Quick save (`Ctrl+S`, PROJECT `Save`, a swipe on SONGS `Save`): [`Self::quick_save`], or the Save dialog when
     /// the song is untitled.
     pub fn save(&mut self, song: &Song) {
@@ -930,6 +956,10 @@ impl ProjectFiles {
     /// `Save New`: the Save dialog, with the title (or `New Song (n)`) as the name, whether the song has a file or
     /// not.
     pub fn save_as(&mut self, song: &Song) {
+        #[cfg(target_os = "android")]
+        if self.room_blocks_export() {
+            return;
+        }
         self.dialog = Some(self.proposed_name(song));
     }
 
@@ -980,6 +1010,10 @@ impl ProjectFiles {
 
     /// Writes `song` to `path` (with `ask`, where the user picks), and with `send` shares the file once written.
     fn write(&mut self, song: &Song, path: &Path, ask: bool, send: bool) {
+        #[cfg(target_os = "android")]
+        if self.room_blocks_export() {
+            return;
+        }
         let stamped = stamped(song, stem(path));
         match (self.codec.write)(&stamped) {
             // What could never be opened again is not saved (on the web, a download past its 128 MiB).

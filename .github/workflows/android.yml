@@ -1,6 +1,6 @@
 name: Android APK
 
-# Builds an installable Android APK (release-optimized with bundled sounds) and uploads it as a workflow artifact.
+# Arena pushes build a lightweight, side-by-side debug APK; release APKs remain available on demand.
 on:
   push:
     branches:
@@ -53,6 +53,7 @@ jobs:
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.0.13004108'
           cargo install cargo-ndk --version 4.1.2 --locked
       - name: Prepare signing key
+        if: ${{ github.event_name != 'push' || !startsWith(github.ref, 'refs/heads/arena/') }}
         id: sign
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -89,8 +90,10 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108"
           args=(--release --abi "$ABI_MODE")
-          # A manual build defaults to the much smaller soundless APK; push builds keep the full bundled version.
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$INCLUDE_SOUNDS" != true ]; then
+          # A debug application ID lets the preview coexist with the installed release.
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/arena/* ]]; then
+            args=(--base --abi arm64-v8a)
+          elif [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$INCLUDE_SOUNDS" != true ]; then
             args+=(--base)
           fi
           set +e
@@ -109,6 +112,8 @@ jobs:
           PY
             exit "$rc"
           fi
+      - name: Test room relay protocol
+        run: node --test deploy/rooms/worker.test.mjs
       - name: Independently verify APK contents and install metadata
         run: |
           shopt -s nullglob

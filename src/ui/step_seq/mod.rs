@@ -1048,7 +1048,7 @@ impl StepSeqView {
         let line = painter.with_clip_rect(painter.clip_rect().intersect(column));
         let span = Rect::from_x_y_ranges(l.grid().x_range(), l.top..=bottom);
         timeline::playhead_line(&line, span, line_x, cx);
-        #[cfg(any(target_arch = "wasm32", test))]
+        #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
         {
             // A swipe's deleted hits show the others as this person's selection, where they were, until its release
             // sends the change.

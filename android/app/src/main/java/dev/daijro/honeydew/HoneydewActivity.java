@@ -39,6 +39,20 @@ public final class HoneydewActivity extends NativeActivity {
     private HoneydewDialogs dialogs;
     private HoneydewStorage storage;
     private HoneydewNetwork network;
+    private final HoneydewRooms rooms = new HoneydewRooms();
+
+    public boolean roomOpen(String endpoint, String route, String name, String token) {
+        return rooms.open(endpoint, route, name, token);
+    }
+    public boolean roomSend(String message) { return rooms.send(message); }
+    public String roomPoll() { return rooms.poll(); }
+    public void roomClose() { rooms.close(); }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        rooms.foreground(true);
+    }
 
     // Stored as Object so ART on API 26-32 never verifies the API 33 interface as a field type.
     private Object backCallback;
@@ -109,6 +123,7 @@ public final class HoneydewActivity extends NativeActivity {
 
     @Override
     protected void onPause() {
+        rooms.foreground(false);
         onLeaving();
         super.onPause();
         onInterrupted();

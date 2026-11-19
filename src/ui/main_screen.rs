@@ -712,7 +712,7 @@ impl MainScreen {
         {
             actions.nav = Some(nav);
         }
-        #[cfg(any(target_arch = "wasm32", test))]
+        #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
         crate::app::live::playlist(
             ui,
             &cx,

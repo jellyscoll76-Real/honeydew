@@ -542,7 +542,7 @@ pub struct AudioEditor {
 impl AudioEditor {
     /// Another person's change came into the song: the selection follows the envelope's points
     /// ([`crate::app::live::follow`]), and the change is no outside change that drops it.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
     pub(crate) fn follow(&mut self, song: &Song) {
         let Some((at, lane, seen)) = &mut self.seen else {
             return;
@@ -769,7 +769,7 @@ impl AudioEditor {
         if let Some(w) = wave {
             self.paint_stretch(ui, cx, &f, axis.x(w.end() * f64::from(PPQ)), now);
         }
-        #[cfg(any(target_arch = "wasm32", test))]
+        #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
         crate::app::live::points(
             ui,
             cx,

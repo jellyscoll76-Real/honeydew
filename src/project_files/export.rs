@@ -210,6 +210,10 @@ impl ProjectFiles {
         only: Option<usize>,
     ) {
         let send = std::mem::take(&mut self.send);
+        #[cfg(target_os = "android")]
+        if self.room_blocks_export() {
+            return;
+        }
         if format == ExportFormat::Flm || !format.available() {
             return;
         }

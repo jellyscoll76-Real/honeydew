@@ -55,9 +55,11 @@ mod typed;
 mod versions;
 // A song load on the web waits for its bundled sounds.
 mod bundle_wait;
-// Live editing in a Playground session (web only).
-#[cfg(any(target_arch = "wasm32", test))]
+// Shared live editing model; the Playground and Android transports are separate.
+#[cfg(any(target_arch = "wasm32", target_os = "android", test))]
 pub(crate) mod live;
+#[cfg(target_os = "android")]
+pub(crate) mod rooms;
 // Audio files dropped on the app.
 mod file_drop;
 // The desktop's sound library: its install and the notice at start.
@@ -294,6 +296,8 @@ pub struct HoneydewApp {
     /// Whether `FLAG_KEEP_SCREEN_ON` is currently active on Android (avoids per-frame JNI calls).
     #[cfg(target_os = "android")]
     screen_kept_on: bool,
+    #[cfg(target_os = "android")]
+    rooms: rooms::Rooms,
 }
 
 impl Default for HoneydewApp {
@@ -379,6 +383,8 @@ impl Default for HoneydewApp {
             sounds: None,
             #[cfg(target_os = "android")]
             screen_kept_on: false,
+            #[cfg(target_os = "android")]
+            rooms: Default::default(),
         }
     }
 }
@@ -783,6 +789,8 @@ impl HoneydewApp {
     /// A whole new song ([`SongEdit::Replaced`]), which stops every live note: a finger still on the piano or on the
     /// chord editor's button holds nothing on it until it lifts and presses again.
     fn song_replaced(&mut self, ctx: &egui::Context) {
+        #[cfg(target_os = "android")]
+        self.rooms.project_replaced();
         self.song_edited(SongEdit::Replaced, 0);
         crate::ui::keyboard::let_go(ctx);
         crate::ui::chord_editor::let_go(ctx);
@@ -1223,7 +1231,20 @@ impl HoneydewApp {
 
     /// What the engine plays while Preview is on: the previewed clip alone ([`preview::solo`]).
     fn solo(&self) -> Option<Song> {
-        self.preview.and_then(|key| preview::solo(&self.song, key))
+        let preview = self.preview.and_then(|key| preview::solo(&self.song, key));
+        #[cfg(target_os = "android")]
+        if preview.is_none() && !self.rooms.monitored.is_empty() {
+            let mut mix = self.song.clone();
+            for ch in &mut mix.channels {
+                ch.params.0[3] = if self.rooms.monitored.contains(&ch.id) {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            return Some(mix);
+        }
+        preview
     }
 
     /// How touches play the keyboard. The keys are disabled while no channel plays (the master alone);
@@ -2630,6 +2651,10 @@ impl HoneydewApp {
         }
         // The transport: a ruler tap seeks, or stops a playing transport; REV stops and goes back to the play-start
         // point, or from there to the song start.
+        #[cfg(target_os = "android")]
+        if let Some(playing) = self.rooms.play.take().filter(|_| !self.main_screen.armed) {
+            self.main_screen.playing = playing;
+        }
         let screen = &mut self.main_screen;
         let mut seek = actions.seek;
         if let Some(next) = self.bar_jump.take() {
@@ -2847,8 +2872,10 @@ impl HoneydewApp {
             self.rack_follows(ctx);
         }
         // After every edit of the frame.
-        #[cfg(any(target_arch = "wasm32", test))]
+        #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
         self.live_frame(ctx, tick);
+        #[cfg(target_os = "android")]
+        self.room_frame(ctx, tick);
         // The focus cursor, over everything.
         focus::end_frame(ctx, &self.theme);
         // The tooltip of the control under the pointer, once every control has named its own.

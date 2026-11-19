@@ -274,7 +274,7 @@ pub struct DrumGridView {
 impl DrumGridView {
     /// Another person's change came into the song: the selection follows its hits ([`crate::app::live::follow`]), and
     /// the change is no outside change that drops it.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
     pub(crate) fn follow(&mut self, song: &Song) {
         let Some(((channel, lane, id), seen)) = &mut self.seen else {
             return;
@@ -422,7 +422,7 @@ impl DrumGridView {
         let painter = ui.painter().clone();
         let prop = graph_lane::DRUM_PROPS[self.graph.item.min(graph_lane::drum_items(false) - 1)];
         self.paint_grid(&painter, &l, &place, events, (color, prop), sig, cx, now);
-        #[cfg(any(target_arch = "wasm32", test))]
+        #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
         crate::app::live::drum_grid(
             ui,
             cx,

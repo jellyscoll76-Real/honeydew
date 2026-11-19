@@ -303,7 +303,7 @@ pub fn show(
     if unsolo {
         changes.extend(unsolo_all(song).into_iter().map(|c| (c, 3, 0.0)));
     }
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
     crate::app::live::mixer(
         &ui,
         cx,

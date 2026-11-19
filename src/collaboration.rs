@@ -116,6 +116,11 @@ fn views(song: &mut Song, local: Option<&Song>) {
         let from = original.unwrap_or(&empty_channel);
         local_fields!(Channel, channel, from; zipped;
             name, kind, id, hue, params, bus_id, output_bus, rack, lanes, drum_kit, file);
+        #[cfg(target_os = "android")]
+        {
+            // Channel solo is per device. Monitoring a peer is a temporary engine mix, not a document edit.
+            channel.params.0[3] = from.params.0[3];
+        }
         let to = &mut channel.file;
         let from = &from.file;
         local_fields!(ChannelFileState, to, from; view, input_monitoring, record_armed, midi_input;

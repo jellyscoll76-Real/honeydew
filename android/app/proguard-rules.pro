@@ -34,6 +34,10 @@
     public *** quitApp();
     public *** setKeepScreenOn(boolean);
     public *** hapticTick();
+    public *** roomOpen(java.lang.String, java.lang.String, java.lang.String, java.lang.String);
+    public *** roomSend(java.lang.String);
+    public *** roomPoll();
+    public *** roomClose();
 }
 
 # Keep AndroidManifest ContentProviders & DocumentsProviders

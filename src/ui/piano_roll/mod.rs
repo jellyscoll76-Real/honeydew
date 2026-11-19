@@ -959,7 +959,12 @@ impl PianoRoll {
         crate::ui::focus::register(ui, id.with("grid"), grid, crate::ui::focus::Kind::Container);
         let g = self.geom(grid.min, u);
         let vocal_consumed = self.vocal_input(ui, &response, &g, song, &mut actions);
-        if !vocal_consumed {
+        #[cfg(target_os = "android")]
+        let locked = song.channels.get(self.channel).zip(self.clip_id)
+            .is_some_and(|(ch, id)| crate::app::rooms::locked_clip(ui.ctx()) == Some((ch.id, self.lane, id)));
+        #[cfg(not(target_os = "android"))]
+        let locked = false;
+        if !vocal_consumed && (!locked || !matches!(self.gesture, Gesture::Idle)) {
             self.grid_input(ui, &response, grid, m, song, &mut actions);
         }
 
@@ -1021,7 +1026,7 @@ impl PianoRoll {
         // The playhead line's slot: over the notes, under their handles, the marquee and the floating row.
         let line_slot = grid_painter.add(egui::Shape::Noop);
         self.paint_selection(&grid_painter, &g, events, cx);
-        #[cfg(any(target_arch = "wasm32", test))]
+        #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
         crate::app::live::piano_roll(
             ui,
             cx,
@@ -1029,7 +1034,7 @@ impl PianoRoll {
             (grid, &g),
             (self.channel, self.lane, self.clip_id),
             match &self.gesture {
-                Gesture::Edit(e) if e.reported => {
+                Gesture::Edit(e) if e.reported || cfg!(target_os = "android") => {
                     (&self.selected[..], Some((&e.orig[..], &e.which[..])))
                 }
                 // A swipe's deleted notes show the others as this person's selection, where they were, until its
@@ -1176,7 +1181,7 @@ impl PianoRoll {
 
     /// Another person's change came into the song: the selection follows its notes ([`crate::app::live::follow`]), and
     /// the change is no outside change that drops it.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
     pub(crate) fn follow(&mut self, song: &Song) {
         let events = self.clip(song).map_or(&[][..], |c| &c.events);
         self.selected = crate::app::live::follow(&self.seen, &self.selected, events, Event::pos);

@@ -7,6 +7,7 @@ use super::*;
 use crate::collaboration::{Conflict, checkpoint, keep_local, merge, shared};
 use crate::flm::chunk::{ContentPath, ContentRoot};
 use crate::params::CHANNEL_PARAMS;
+#[cfg(any(target_arch = "wasm32", test))]
 use crate::project_files::MAX_FILE_BYTES;
 use crate::sample_cache::SampleKey;
 use crate::song::TimeSig;
@@ -21,6 +22,7 @@ use crate::ui::step_seq::{self, Layout};
 use egui::{Color32, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, VecDeque};
+#[cfg(any(target_arch = "wasm32", test))]
 use std::path::{Path, PathBuf};
 
 /// A remote change waiting for a quiet frame: `edited` relative to `base`, or with no base the whole shared song.
@@ -87,6 +89,7 @@ pub(crate) fn disconnect() {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn queue(base: Option<Vec<u8>>, edited: Vec<u8>, done: Done) {
     let done = LIVE.with_borrow_mut(|live| {
         if !live.connected {
@@ -105,6 +108,7 @@ pub(crate) fn queue(base: Option<Vec<u8>>, edited: Vec<u8>, done: Done) {
 }
 
 /// Passes Undo or Redo to the session while connected: whether it did.
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn undo(redo: bool) -> bool {
     let connected = LIVE.with_borrow_mut(|live| {
         #[cfg(test)]
@@ -149,10 +153,12 @@ pub(crate) fn user_media(song: &Song) -> Vec<String> {
 }
 
 /// [`user_media`] of a shared checkpoint.
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn assets_of(bytes: &[u8]) -> Result<Vec<String>, Conflict> {
     Ok(user_media(&checkpoint::decode(bytes)?))
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn media_key(id: &str) -> ContentPath {
     ContentPath::Shorthand {
         root: ContentRoot::User,
@@ -161,11 +167,13 @@ fn media_key(id: &str) -> ContentPath {
 }
 
 impl HoneydewApp {
+    #[cfg(any(target_arch = "wasm32", test))]
     fn media_file(&self, id: &str) -> Option<PathBuf> {
         self.files.resolve(&media_key(id))
     }
 
     /// The live song's user media: (id, file name, whether this tab has the file).
+    #[cfg(any(target_arch = "wasm32", test))]
     pub(crate) fn live_assets(&self) -> Vec<(String, String, bool)> {
         (user_media(&self.song).into_iter())
             .map(|id| {
@@ -178,6 +186,7 @@ impl HoneydewApp {
             .collect()
     }
 
+    #[cfg(any(target_arch = "wasm32", test))]
     pub(crate) fn live_read_asset(&self, id: &str) -> Option<Vec<u8>> {
         self.files.read_user_file(&self.media_file(id)?).ok()
     }
@@ -185,6 +194,7 @@ impl HoneydewApp {
     /// Keeps a sample that arrived from the session as Import keeps one (this tab's user copies), never over a file
     /// already here: two people's different files under one path each keep their own. Its missing mark goes and the
     /// next quiet frame's engine decodes it. No song change, no undo step.
+    #[cfg(any(target_arch = "wasm32", test))]
     pub(crate) fn live_write_asset(&mut self, id: &str, bytes: Vec<u8>) {
         let Some(path) = self.media_file(id) else {
             return;
@@ -222,7 +232,7 @@ impl HoneydewApp {
     /// Nothing under way that a remote change would cut short or a proposal would catch half done: no pointer down
     /// (a drag, a held control), no param or sample-row gesture, no channel params outside the history, no recording, no
     /// question about what a playlist delete emptied (its yes joins the delete's change).
-    fn live_quiet(&self, ctx: &egui::Context) -> bool {
+    pub(super) fn live_quiet(&self, ctx: &egui::Context) -> bool {
         !ctx.input(|i| i.pointer.any_down())
             && !self.param_gesture
             && !self.row_drag
@@ -276,7 +286,7 @@ impl HoneydewApp {
 
     /// Merges a remote change into the song as an undo step's restore does ([`Self::step`]), with no step of its own.
     // ponytail: mirrors `step`'s install sequence; share one helper upstream if either changes.
-    fn live_apply(
+    pub(super) fn live_apply(
         &mut self,
         tick: u64,
         base: Option<&[u8]>,
@@ -386,6 +396,15 @@ pub(crate) struct Presence {
     /// A mixer fader or knob held: its channel id, param (0 level, 1 pan) and value so far.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     param: Option<(i32, u8, f32)>,
+}
+
+#[cfg(target_os = "android")]
+impl Presence {
+    pub(super) fn piano_drag(&self) -> Option<(i32, usize, u32)> {
+        (self.view == "piano" && !self.drag_notes.is_empty())
+            .then_some(self.clip)
+            .flatten()
+    }
 }
 
 /// The pointer: a song tick on a playlist track (channel id, lane), or a content tick on a key row of the piano roll or

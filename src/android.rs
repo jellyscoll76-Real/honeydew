@@ -689,3 +689,66 @@ pub fn with_activity(
     }
     result
 }
+
+// The room WebSocket is owned by the Activity; Rust handles only bounded messages on egui's thread.
+pub(crate) fn room_open(endpoint: &str, route: &str, name: &str, token: &str) -> bool {
+    let mut opened = false;
+    let _ = with_activity(|env, activity| {
+        let endpoint = env.auto_local(env.new_string(endpoint)?);
+        let route = env.auto_local(env.new_string(route)?);
+        let name = env.auto_local(env.new_string(name)?);
+        let token = env.auto_local(env.new_string(token)?);
+        opened = env
+            .call_method(
+                activity,
+                "roomOpen",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+                &[
+                    endpoint.as_ref().into(),
+                    route.as_ref().into(),
+                    name.as_ref().into(),
+                    token.as_ref().into(),
+                ],
+            )?
+            .z()?;
+        Ok(())
+    });
+    opened
+}
+
+pub(crate) fn room_send(message: &str) -> bool {
+    let mut sent = false;
+    let _ = with_activity(|env, activity| {
+        let message = env.auto_local(env.new_string(message)?);
+        sent = env
+            .call_method(
+                activity,
+                "roomSend",
+                "(Ljava/lang/String;)Z",
+                &[message.as_ref().into()],
+            )?
+            .z()?;
+        Ok(())
+    });
+    sent
+}
+
+pub(crate) fn room_poll() -> Option<String> {
+    let mut message = None;
+    let _ = with_activity(|env, activity| {
+        let object = env
+            .call_method(activity, "roomPoll", "()Ljava/lang/String;", &[])?
+            .l()?;
+        if !object.is_null() {
+            let string = env.auto_local(jni::objects::JString::from(object));
+            message = text(env, &string);
+        }
+        Ok(())
+    });
+    message
+}
+
+pub(crate) fn room_close() {
+    let _ =
+        with_activity(|env, activity| env.call_method(activity, "roomClose", "()V", &[]).map(drop));
+}

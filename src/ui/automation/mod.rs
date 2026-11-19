@@ -331,7 +331,7 @@ fn sel_box(pts: &[Point], sel: &[bool], at: impl Fn(&Point) -> Pos2) -> Option<R
 impl AutomationEditor {
     /// Another person's change came into the song: the selection follows its points ([`crate::app::live::follow`]),
     /// and the change is no outside change that drops it.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
     pub(crate) fn follow(&mut self, song: &Song) {
         let Some((key, seen)) = &mut self.seen else {
             return;
@@ -526,7 +526,7 @@ impl AutomationEditor {
             let growth = self.handle_press.growth(ui.ctx(), Part::Scale, now);
             clips::paint_handle(&ui.painter_at(f.grid), cx, bar, (1.0, growth), true);
         }
-        #[cfg(any(target_arch = "wasm32", test))]
+        #[cfg(any(target_arch = "wasm32", target_os = "android", test))]
         crate::app::live::points(
             ui,
             cx,
