@@ -201,6 +201,8 @@ const FRAME_ALPHA: f32 = 0.3;
 const TINT_MID: f32 = 0.66;
 /// An automation miniature and an audio waveform sample the tint here.
 const CURVE_TINT: f32 = 0.8;
+/// Switch dense note miniatures to pixel-grid rendering once a view would otherwise visit this many event plays.
+const MINIATURE_LOD_PLAYS: f64 = 512.0;
 
 /// Song ticks to x and back. `origin` is the x of tick 0 (left of the grid once scrolled).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2497,6 +2499,67 @@ fn notes(
     let p = area.height() / (f32::from(hi - lo) + 2.0);
     let base = start - (clip.offset_beats * f64::from(PPQ)).rem_euclid(lp);
     let px_ticks = f64::from(px / axis.beat_w) * f64::from(PPQ);
+    // At overview zoom, a loop can still yield thousands of individual note rectangles even though they resolve to
+    // the same handful of screen pixels. Keep the event walk bounded as before, but rasterize dense views into a
+    // device-pixel grid and submit them as one mesh. The cell keeps the strongest velocity; at closer zooms the exact
+    // note geometry and layering below are unchanged.
+    let dense_overview = px_ticks >= 1.0
+        && lp > 0.0
+        && clip.events.len() as f64 * (to - from).max(0.0) / lp >= MINIATURE_LOD_PLAYS;
+    if dense_overview {
+        let seen = painter.clip_rect();
+        let first_col = (seen.left() / px).floor() as i64;
+        let end_col = (seen.right() / px).ceil() as i64;
+        let cols = end_col.saturating_sub(first_col).max(0) as usize;
+        let keys = usize::from(hi - lo) + 1;
+        let Some(cell_count) = cols.checked_mul(keys) else {
+            return;
+        };
+        let mut pixels = vec![0_u16; cell_count];
+        for (tick, event) in clip.plays_to_draw(from as u64, to.max(from) as u64, px_ticks) {
+            let Some((len, key, velocity)) = note(event) else {
+                continue;
+            };
+            let tick = tick as f64;
+            let end = base + (((tick - base) / lp).floor() + 1.0) * lp;
+            let x = m.floor_px(axis.x(tick));
+            let right = (x + width(len)).min(m.floor_px(axis.x(end)));
+            let key_index = usize::from(key - lo);
+            let a = ((x / px).floor() as i64 - first_col).clamp(0, cols as i64) as usize;
+            let b = ((right / px).ceil() as i64 - first_col).clamp(0, cols as i64) as usize;
+            for col in a..b {
+                let cell = &mut pixels[col * keys + key_index];
+                *cell = (*cell).max(u16::from(velocity) + 1);
+            }
+        }
+        let mut mesh = Mesh::default();
+        for key_index in 0..keys {
+            let key = lo + key_index as u8;
+            let y = m.floor_px(area.bottom() - t - (f32::from(key) - f32::from(lo) + 1.0) * p);
+            let mut col = 0;
+            while col < cols {
+                let velocity = pixels[col * keys + key_index];
+                if velocity == 0 {
+                    col += 1;
+                    continue;
+                }
+                let first = col;
+                col += 1;
+                while col < cols && pixels[col * keys + key_index] == velocity {
+                    col += 1;
+                }
+                let x = (first_col + first as i64) as f32 * px;
+                mesh.add_colored_rect(
+                    Rect::from_min_size(pos2(x, y), vec2((col - first) as f32 * px, t)),
+                    ink((velocity - 1) as u8),
+                );
+            }
+        }
+        if !mesh.indices.is_empty() {
+            painter.add(mesh);
+        }
+        return;
+    }
     // Per key, how far right its drawn notes reach. The plays come in time order, so a note that ends there too lies
     // within one already drawn: a dense clip zoomed out draws a few rects a row, not every note.
     let mut drawn = vec![f32::NEG_INFINITY; usize::from(hi - lo) + 1];
@@ -4944,9 +5007,15 @@ mod tests {
                 });
             });
             let fills = (out.shapes.iter())
-                .filter_map(|c| match &c.shape {
-                    egui::Shape::Rect(r) if r.fill == Color32::RED => Some(r.rect),
-                    _ => None,
+                .flat_map(|c| match &c.shape {
+                    egui::Shape::Rect(r) if r.fill == Color32::RED => vec![r.rect],
+                    egui::Shape::Mesh(mesh) => mesh
+                        .vertices
+                        .chunks_exact(4)
+                        .filter(|quad| quad[0].color == Color32::RED)
+                        .map(|quad| Rect::from_two_pos(quad[0].pos, quad[3].pos))
+                        .collect(),
+                    _ => Vec::new(),
                 })
                 .collect();
             let _ = tx.send(fills);
