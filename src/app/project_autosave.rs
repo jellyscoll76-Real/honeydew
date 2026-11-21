@@ -9,6 +9,7 @@ pub(super) struct Timer {
     warning: Option<f64>,
 }
 impl Timer {
+    fn pause(&mut self) { self.warning = None; }
     /// A late/background frame still starts a full five-second warning, never skips it.
     fn tick(
         &mut self,
@@ -81,6 +82,10 @@ impl BanaForgeApp {
             if !self.settings.auto_save && self.project_autosave.worker.is_none() {
                 self.project_autosave.timer = Timer::default();
                 self.project_autosave.status = None;
+                return;
+            }
+            if ctx.input(|i| !i.focused || crate::ui::focus_lost(i)) {
+                self.project_autosave.timer.pause();
                 return;
             }
             if self.project_autosave.worker.as_ref().is_some_and(|w| w.is_finished()) {
@@ -230,6 +235,15 @@ mod tests {
         assert_eq!(t.tick(106.0, true, 10, true, false), (true, None));
         t.tick(111.0, true, 10, true, false);
         assert_eq!(t.tick(116.0, true, 10, false, false), (false, None));
+    }
+    #[test]
+    fn auto_save_backgrounding_during_countdown_restarts_full_warning() {
+        let mut t = Timer::default();
+        t.tick(0.0, true, 10, true, false);
+        assert_eq!(t.tick(5.0, true, 10, true, false), (false, Some(5)));
+        t.pause();
+        assert_eq!(t.tick(100.0, true, 10, true, false), (false, Some(5)));
+        assert_eq!(t.tick(105.0, true, 10, true, false), (true, None));
     }
     #[test]
     fn auto_save_worker_roundtrip_and_failed_encode_preserves_previous_copy() {
