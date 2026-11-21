@@ -140,6 +140,10 @@ const DEFAULT_SOUND_MODE: u8 = 3;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    #[serde(rename = "autoSave")]
+    pub auto_save: bool,
+    #[serde(rename = "autoSaveIntervalSecs")]
+    pub auto_save_interval_secs: u32,
     #[serde(rename = "vocalSynth.desktopWorkspace")]
     pub vocal_desktop_workspace: bool,
     #[serde(rename = "vocalSynth.inspectorVisible")]
@@ -413,6 +417,8 @@ impl Default for Settings {
     /// (the fallback theme), `100 %` and `Animation` `Full`. The metronome level is half way; the drum pads are locked.
     fn default() -> Self {
         Self {
+            auto_save: false,
+            auto_save_interval_secs: 300,
             vocal_desktop_workspace: true,
             vocal_inspector_visible: true,
             vocal_browser_visible: false,
@@ -532,6 +538,7 @@ impl Settings {
             serde_json::from_value::<Self>(Value::Object(one)).is_ok()
         });
         let mut s: Self = serde_json::from_value(Value::Object(fields)).unwrap_or_default();
+        s.auto_save_interval_secs = s.auto_save_interval_secs.clamp(10, 86400);
         s.playlist_follow_position = s.playlist_follow_position.clamp(50, 950);
         s.vocal_waveform_offset_y = s.vocal_waveform_offset_y.min(40);
         let d = Self::default();
@@ -892,6 +899,8 @@ mod tests {
                 .get(1)
                 .map(|&(id, _)| id)
                 .unwrap_or(d.sound_mode),
+            auto_save: true,
+            auto_save_interval_secs: 90,
             waveform_quality: crate::ui::waveform_quality::WaveformQuality::Balanced,
             piano_roll_note_style: crate::ui::piano_roll::appearance::NoteStyle::Accent,
             envelope_display: crate::ui::envelope_display::EnvelopeDisplay { visible: false, colors: [[20, 80, 255], [255, 255, 255]] },
@@ -1271,6 +1280,8 @@ mod tests {
                 "SongBrowserOrdering",
                 "SoundFontPatchOrdering",
                 "audioInput",
+                "autoSave",
+                "autoSaveIntervalSecs",
                 "automationValueSnap",
                 "bgAudio",
                 "checkForUpdates",
@@ -1691,5 +1702,18 @@ mod note_appearance_tests {
             assert_eq!(loaded.key_names, s.key_names);
             assert_eq!(loaded.sound_mode, s.sound_mode);
         }
+    }
+}
+
+#[cfg(test)]
+mod auto_save_preferences {
+    use super::*;
+    #[test]
+    fn auto_save_preferences_roundtrip_and_default_off() {
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!s.auto_save); assert_eq!(s.auto_save_interval_secs, 300);
+        let mut s = s; s.auto_save = true; s.auto_save_interval_secs = 90;
+        let loaded: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert!(loaded.auto_save); assert_eq!(loaded.auto_save_interval_secs, 90);
     }
 }

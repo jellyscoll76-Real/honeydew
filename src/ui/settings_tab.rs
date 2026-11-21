@@ -143,6 +143,7 @@ enum Kind {
     BufferSize,
     WaveformGap,
     McpPort,
+    AutoSaveInterval,
     McpToken,
     McpStatus,
     /// A disabled toggle fixed in this state.
@@ -245,7 +246,7 @@ const fn row(label: &'static str, kind: Kind) -> Row {
 
 // Explicit platform inputs let host tests exercise mobile filtering too.
 fn platform_row_visible(r: &Row, desktop: bool, web: bool) -> bool {
-    !(web
+    !(web && matches!(r.label, "Auto-Save" | "Auto-Save interval:")) && !(web
         && matches!(
             r.kind,
             Kind::Dropdown(Choice::SampleMemory) | Kind::AudioInput
@@ -260,7 +261,7 @@ fn platform_row_visible(r: &Row, desktop: bool, web: bool) -> bool {
 
 /// Every row of the SETTINGS tab, in order.
 // The raw buffer slider is desktop-only; mobile has one fewer settings row.
-const ROWS: [Row; 78 + cfg!(desktop) as usize] = {
+const ROWS: [Row; 80 + cfg!(desktop) as usize] = {
     use Kind::*;
     [
         row("MIDI:", Header),
@@ -313,6 +314,8 @@ const ROWS: [Row; 78 + cfg!(desktop) as usize] = {
             Toggle(|s| &mut s.show_information_buttons),
         ),
         row("Application:", Header),
+        row("Auto-Save", Toggle(|s| &mut s.auto_save)),
+        row("Auto-Save interval:", AutoSaveInterval),
         row("Edit:", Header),
         row(
             "Show Playlist envelopes",
@@ -976,6 +979,18 @@ impl SettingsTab {
                     None,
                 );
             }
+            Kind::AutoSaveInterval => {
+                label(ui, before(button_rect), FontSize::Pt10);
+                ui.put(button_rect, DragValue::new(&mut s.auto_save_interval_secs).range(10..=86400)
+                    .custom_formatter(|n, _| format!("{}:{:02}", n as u32 / 60, n as u32 % 60))
+                    .custom_parser(|text| {
+                        if let Some((m, s)) = text.split_once(':') {
+                            let seconds = s.parse::<u32>().ok()?;
+                            (seconds < 60).then_some(m.parse::<u32>().ok()?.saturating_mul(60).saturating_add(seconds) as f64)
+                        } else { text.parse::<f64>().ok() }
+                    }));
+                crate::ui::tooltip::tip(ui, r, "Minutes:seconds, 0:10–1440:00. Auto-Save writes a separate recovery project in My Songs / Auto-saved projects, never over your manual save. A five-second warning precedes it; active edits and recording defer it.", None);
+            }
             Kind::McpPort => {
                 label(ui, before(button_rect), FontSize::Pt10);
                 let port = Rect::from_min_size(
@@ -1573,6 +1588,8 @@ mod tests {
                 "Animation:",
                 "Show information buttons",
                 "Application:",
+                "Auto-Save",
+                "Auto-Save interval:",
                 "Edit:",
                 "Show Playlist envelopes",
                 "VOL / PAN colors",

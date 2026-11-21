@@ -2031,3 +2031,11 @@ fn platform_provider() -> Box<dyn FileProvider> {
 pub(crate) mod mem;
 #[cfg(test)]
 pub(crate) mod tests;
+
+/// Opt-in recovery copies are always separate from the manually saved project.
+pub(crate) fn auto_save_snapshot(song: &Song) -> Song { stamped(song, song.title.clone()) }
+impl ProjectFiles {
+    pub(crate) fn auto_save_root(&self) -> Option<PathBuf> {
+        Some(self.disk_user_dir()?.join(crate::ui::main_menu::SONGS_FOLDER).join("Auto-saved projects"))
+    }
+}

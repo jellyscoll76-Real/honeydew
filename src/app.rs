@@ -38,6 +38,7 @@ use crate::ui::views::{self, AppCtx, Nav, Navigation, Overlay, Slots, SongEdit, 
 use crate::ui::{panel_resize, wheels};
 
 mod audio_edit;
+mod project_autosave;
 pub(crate) mod auto_record;
 pub(crate) mod automation;
 #[cfg(all(not(target_arch = "wasm32"), not(mobile)))]
@@ -203,6 +204,7 @@ pub struct BanaForgeApp {
     quitting: bool,
     /// The flash shown (`Saved!`), and when it showed.
     flash: Option<(String, f64)>,
+    project_autosave: project_autosave::AutoSaver,
     /// The view the last frame started with: a roll that goes ends its new note's sound ([`Self::left_view`]).
     shown: View,
     /// Preview (the editors' transport toggle): the clip the engine plays alone while it is on.
@@ -331,6 +333,7 @@ impl Default for BanaForgeApp {
             params_moved: false,
             quitting: false,
             flash: None,
+            project_autosave: Default::default(),
             preview: None,
             sent_loop: None,
             song_length: None,
@@ -742,6 +745,7 @@ impl BanaForgeApp {
             }
             SongEdit::Restored => self.restore_version(tick),
             SongEdit::Replaced => {
+                self.project_autosave.reset_project();
                 // A new song counts from its own first action, and no slider drag of the old one goes on.
                 (self.last_action, self.row_drag) = (None, false);
                 // Its view zooms per U, for its history and engine too.
@@ -2147,6 +2151,8 @@ impl BanaForgeApp {
         self.files.keep_recent(&self.song, f64::INFINITY, true);
         #[cfg(not(target_arch = "wasm32"))]
         self.files.join_autosave();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.project_autosave.finish();
         #[cfg(target_os = "android")]
         {
             self.screen_kept_on = false;
@@ -2918,6 +2924,7 @@ impl BanaForgeApp {
         self.file_drop(ctx, &metrics, tick);
         self.quit(ctx);
         self.flash(ctx, &metrics);
+        self.project_autosave(ctx, &metrics);
         if self.current_channel() != was_current {
             self.rack_follows(ctx);
         }
@@ -3033,6 +3040,7 @@ mod tests {
     use eframe::egui::{Pos2, pos2, vec2};
 
     mod audio_edit;
+mod project_autosave;
     mod automation;
     mod automation_editor;
     mod chrome;

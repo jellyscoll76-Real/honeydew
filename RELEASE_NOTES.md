@@ -1,3 +1,11 @@
+BanaForge 0.5.30 — opt-in interval Auto-Save
+
+- Auto-Save defaults OFF; interval defaults to 5:00 and can be entered as minutes:seconds (0:10–1440:00) in Settings → Application.
+- A non-interactive top banner counts down a full five seconds before a recovery project is saved. Late frames do not skip the warning. Disable or change interval to cancel/restart the pending timer; changing projects resets it.
+- Recovery projects go to My Songs / Auto-saved projects in a unique session/project folder. They never overwrite a manual save, rename the current project, clear unsaved changes, add undo steps or send audio commands. Untitled projects are protected too. Existing recent-session crash recovery remains separate and unchanged.
+- Encode and atomic temporary-file/write/sync/rename run on a single background worker. Snapshot/plugin-state capture uses the existing UI-thread save snapshot path. Active touches, parameter edits, recording and app overlays defer the scheduled snapshot; ordinary playback continues. An already-started write finishes safely if disabled.
+- Reports save failures rather than claiming success. Browser sessions without disk storage do not expose the feature. Physical Android timing and heavy-project responsiveness remain acceptance tests, not guarantees.
+
 BanaForge 0.5.29 — Android ARMv7 / ARM64 compatibility delivery
 
 - Ship a universal playtest APK containing actual `armeabi-v7a` and `arm64-v8a` native engines and matching C++ runtimes. Existing per-ABI builds remain selectable; previous playtest artifacts were explicitly ARM64-only.
