@@ -190,6 +190,7 @@ enum Kind {
     ForgetPluginFolders,
     /// `Theme creator`: the label and an `Edit` button, which opens the theme creator ([`SettingsTab::take_creator`]).
     ThemeCreator,
+    EnvelopeColors,
 }
 
 /// What the plugin rows asked the app for ([`SettingsTab::take_plugin_action`]).
@@ -258,7 +259,7 @@ fn platform_row_visible(r: &Row, desktop: bool, web: bool) -> bool {
 
 /// Every row of the SETTINGS tab, in order.
 // The raw buffer slider is desktop-only; mobile has one fewer settings row.
-const ROWS: [Row; 72 + cfg!(desktop) as usize] = {
+const ROWS: [Row; 77 + cfg!(desktop) as usize] = {
     use Kind::*;
     [
         row("MIDI:", Header),
@@ -306,7 +307,17 @@ const ROWS: [Row; 72 + cfg!(desktop) as usize] = {
         row("Scaling:", Scaling),
         row("Scale is currently limited to", ScaleLimit),
         row("Animation:", Dropdown(Choice::Animation)),
+        row(
+            "Show information buttons",
+            Toggle(|s| &mut s.show_information_buttons),
+        ),
         row("Application:", Header),
+        row("Edit:", Header),
+        row(
+            "Show Playlist envelopes",
+            Toggle(|s| &mut s.envelope_display.visible),
+        ),
+        row("VOL / PAN colors", EnvelopeColors),
         row("Enable ghost notes", Toggle(|s| &mut s.ghost_notes)),
         row(
             "Show key names on keyboard and piano roll",
@@ -325,6 +336,10 @@ const ROWS: [Row; 72 + cfg!(desktop) as usize] = {
         row(
             "Track activity indicators",
             Toggle(|s| &mut s.track_activity_indicators),
+        ),
+        row(
+            "Match activity indicators to track color",
+            Toggle(|s| &mut s.track_activity_colors),
         ),
         row("Show hidden tracks", Toggle(|s| &mut s.show_hidden_tracks)),
         row(
@@ -668,7 +683,9 @@ impl SettingsTab {
             ui.painter().rect_filled(thumb, 0.0, ink);
         }
         ui.set_clip_rect(outer_clip);
+        crate::ui::help::publish_icon_visibility(ui.ctx(), settings.show_information_buttons);
         self.popup(ui, cx, settings);
+        crate::ui::envelope_display::panel(ui.ctx(), &mut settings.envelope_display);
     }
 
     /// Draws row `index` in its `slot` of the list (a pitch tall) and applies its edit.
@@ -682,6 +699,13 @@ impl SettingsTab {
         s: &mut Settings,
     ) {
         let (m, colors) = (cx.m, &cx.theme.colors);
+        if let Some(topic) = crate::ui::help::setting(row.label) {
+            crate::ui::help::button(
+                ui,
+                Pos2::new(slot.left() - m.u(TOGGLE_OUT) - 32.0, slot.center().y - 15.0),
+                topic,
+            );
+        }
         // Headers and the metronome row take the whole slot; the other rows are a control row, centred in it.
         let r = match row.kind {
             Kind::Header | Kind::Level | Kind::Scaling | Kind::BufferSize | Kind::WaveformGap => {
@@ -1056,6 +1080,12 @@ impl SettingsTab {
             Kind::SignIn => {
                 label(ui, before(button_rect), FontSize::Pt10);
                 light_button(ui, button_rect, "Sign In", false);
+            }
+            Kind::EnvelopeColors => {
+                label(ui, before(button_rect), FontSize::Pt10);
+                if light_button(ui, button_rect, "Colors", true) {
+                    crate::ui::envelope_display::open(ui.ctx());
+                }
             }
             Kind::ThemeCreator => {
                 label(ui, before(button_rect), FontSize::Pt10);
@@ -1509,7 +1539,11 @@ mod tests {
                 "Scaling:",
                 "Scale is currently limited to",
                 "Animation:",
+                "Show information buttons",
                 "Application:",
+                "Edit:",
+                "Show Playlist envelopes",
+                "VOL / PAN colors",
                 "Enable ghost notes",
                 "Show key names on keyboard and piano roll",
                 "Set middle C to C4",
@@ -1517,6 +1551,7 @@ mod tests {
                 "Keyboard in pickers",
                 "Continuous scrolling during playback",
                 "Track activity indicators",
+                "Match activity indicators to track color",
                 "Show hidden tracks",
                 "Show CPU and RAM meters",
                 "Show performance overlay",
