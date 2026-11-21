@@ -904,6 +904,8 @@ impl ProjectFiles {
     }
 
     /// Changes with every save and every copy kept in the library.
+    pub(crate) fn auto_save_completed(&mut self) { self.library_changes += 1; }
+
     pub fn library_changes(&self) -> u64 {
         self.library_changes
     }

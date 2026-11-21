@@ -38,7 +38,6 @@ use crate::ui::views::{self, AppCtx, Nav, Navigation, Overlay, Slots, SongEdit, 
 use crate::ui::{panel_resize, wheels};
 
 mod audio_edit;
-mod project_autosave;
 pub(crate) mod auto_record;
 pub(crate) mod automation;
 #[cfg(all(not(target_arch = "wasm32"), not(mobile)))]
@@ -51,6 +50,7 @@ mod midi;
 pub(crate) mod note_record;
 mod panel;
 mod plugins;
+mod project_autosave;
 mod tracks;
 mod typed;
 mod versions;

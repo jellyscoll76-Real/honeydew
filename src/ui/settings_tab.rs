@@ -1673,6 +1673,7 @@ mod tests {
                     | Kind::AudioInput
                     | Kind::FixedDropdown(_)
                     | Kind::Scaling
+                    | Kind::AutoSaveInterval
             );
             // Vocal workspace fixed informational selectors use their original unpunctuated labels.
             if !matches!(r.kind, Kind::FixedDropdown(_)) {
