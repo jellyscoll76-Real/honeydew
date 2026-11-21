@@ -3040,7 +3040,6 @@ mod tests {
     use eframe::egui::{Pos2, pos2, vec2};
 
     mod audio_edit;
-mod project_autosave;
     mod automation;
     mod automation_editor;
     mod chrome;

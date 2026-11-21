@@ -67,7 +67,7 @@ impl BanaForgeApp {
             let root = self.files.auto_save_root();
             let busy = self.project_autosave.worker.is_some();
             let blocked = busy || self.recording() || self.param_gesture || self.params_moved
-                || ctx.input(|i| i.pointer.any_down()) || !self.nav.overlays.is_empty();
+                || ctx.input(|i| i.pointer.any_down()) || self.nav.overlays.iter().any(|o| !matches!(o, crate::ui::views::Overlay::Rack(_) | crate::ui::views::Overlay::BananaEditor { .. } | crate::ui::views::Overlay::KeyboardSettings));
             let (save, countdown) = self.project_autosave.timer.tick(now,
                 self.settings.auto_save && root.is_some(), self.settings.auto_save_interval_secs,
                 self.files.modified(), blocked);
@@ -115,6 +115,7 @@ fn write_recovery(root: std::path::PathBuf, folder: Option<std::path::PathBuf>, 
     write: fn(&crate::song::Song) -> Result<Vec<u8>, String>) -> Result<std::path::PathBuf, String> {
     use std::io::Write;
     let bytes = write(&song)?; // Encode successfully before touching an existing recovery file.
+    if bytes.len() as u64 > crate::project_files::MAX_FILE_BYTES { return Err("Project exceeds the readable file-size limit".into()); }
     let folder = match folder {
         Some(folder) => folder,
         None => {
@@ -170,6 +171,9 @@ mod tests {
         (codec.read)(&before).unwrap();
         fn fail(_: &crate::song::Song) -> Result<Vec<u8>, String> { Err("injected encoder failure".into()) }
         assert!(write_recovery(root.clone(), Some(folder.clone()), song, fail).is_err());
+        assert_eq!(std::fs::read(folder.join("Project.flm")).unwrap(), before);
+        std::fs::create_dir(folder.join(".Project.flm.tmp")).unwrap();
+        assert!(write_recovery(root.clone(), Some(folder.clone()), crate::song::Song::default(), codec.write).is_err());
         assert_eq!(std::fs::read(folder.join("Project.flm")).unwrap(), before);
         std::fs::remove_dir_all(root).unwrap();
     }
