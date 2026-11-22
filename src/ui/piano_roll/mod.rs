@@ -2717,6 +2717,13 @@ impl PianoRoll {
                 let Some((pos, len, key)) = note(e) else {
                     continue;
                 };
+                // Painter clipping alone still allocates offscreen stems/caps.
+                // Keep notes crossing either edge, including the minimum-width stem.
+                let x0 = m.round_px(g.x(pos));
+                let x1 = g.x(pos + len).max(x0 + px);
+                if x0 > values.right() || x1.max(x0 + 4.0 * px) < values.left() {
+                    continue;
+                }
                 let v = if let Some(expression) = expression {
                     let value = vocal_values
                         .get(&(pos as u32, key))
@@ -2728,8 +2735,6 @@ impl PianoRoll {
                 } else {
                     continue;
                 };
-                let x0 = m.round_px(g.x(pos));
-                let x1 = g.x(pos + len).max(x0 + px);
                 let from = match prop {
                     Prop::Pan => top - px + h / 2.0,
                     _ => bottom,

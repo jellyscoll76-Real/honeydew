@@ -1,4 +1,5 @@
 name: UI responsiveness profiling
+# Compare the same release harness after UI-only optimizations.
 on:
   push:
     branches: ["arena/**"]
@@ -18,6 +19,10 @@ jobs:
       - name: Build harness outside measurements
         run: |
           cargo test --release --lib ui_responsiveness_profile --no-run > /tmp/build.log 2>&1 || { tail -90 /tmp/build.log; exit 1; }
+      - name: UI regression tests
+        run: |
+          cargo test --release --lib ui::widgets::text::tests
+          cargo test --release --lib ui::piano_roll::tests
       - name: Profile UI work and process resources
         run: |
           mkdir -p measurements

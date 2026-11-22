@@ -41,11 +41,16 @@ fn truncate(
     let mut tail = ((n - 3) / 2).min(k);
     let mut head = n - 3 - tail;
     let w: Vec<f32> = chars.iter().map(|&c| char_w(c)).collect();
-    let width = |r: std::ops::Range<usize>| w[r].iter().sum::<f32>();
-    while width(0..head) + dots + width(n - tail..n) > max_w {
+    // Maintain the two widths instead of re-summing shrinking slices (quadratic on
+    // long imported filenames). f64 limits cancellation while removing glyphs.
+    let mut head_w: f64 = w[..head].iter().map(|&v| f64::from(v)).sum();
+    let mut tail_w: f64 = w[n - tail..].iter().map(|&v| f64::from(v)).sum();
+    while head_w + f64::from(dots) + tail_w > f64::from(max_w) {
         if head > tail {
             head -= 1;
+            head_w -= f64::from(w[head]);
         } else if tail > 0 {
+            tail_w -= f64::from(w[n - tail]);
             tail -= 1;
         } else {
             // Even `...` alone is too wide.
@@ -257,6 +262,21 @@ mod tests {
         assert_eq!(truncate("AVAVAV", 5, 4.9, 5.0, 1.5, w), "AV...V");
         assert_eq!(truncate("AVAVAV", 5, 4.4, 5.0, 1.5, w), "A...V");
     }
+    #[test]
+    fn long_unicode_labels_keep_bounded_head_and_tail() {
+        let text = "音a".repeat(4096);
+        let mut calls = 0;
+        let shown = truncate(&text, 5, 40.0, 8192.0, 3.0, |_| {
+            calls += 1;
+            1.0
+        });
+        assert_eq!(calls, 8192);
+        assert_eq!(shown.chars().count(), 40);
+        assert!(shown.ends_with("...a音a音a"));
+        assert_eq!(truncate(&text, 0, 3.0, 8192.0, 3.0, |_| 1.0), "...");
+        assert_eq!(truncate(&text, 5, 2.0, 8192.0, 3.0, |_| 1.0), "");
+    }
+
     #[test]
     #[ignore]
     fn ui_responsiveness_profile_long_labels() {
