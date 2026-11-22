@@ -54,6 +54,8 @@ fn high_clip_count_playlist_interactions() {
                         let handle = rig.ctx.read_response(id).expect("selected clip end handle drawn").rect;
                         let from = handle.center();
                         rig.press(from);
+                        assert!(rig.ctx.read_response(id).unwrap().is_pointer_button_down_on(),
+                            "pointer down must be captured by the clip end handle");
                         rig.drag_to(from + vec2(28.0, 0.0));
                         rig.release(from + vec2(28.0, 0.0));
                         let resized = rig.app.song.channels[1].lanes[0].clips.iter()
