@@ -35,6 +35,8 @@ pub(crate) mod count_profile;
 use banaforge_audio::drums::SPEED;
 use banaforge_audio::sample_edit::speed_ratio;
 use banaforge_audio::slicer;
+#[cfg(test)]
+use std::collections::HashSet;
 use eframe::egui::{
     self, Align2, Color32, FontId, Id, Mesh, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
     pos2, vec2,
@@ -246,6 +248,7 @@ pub fn zoomed(
 
 /// A clip of the playlist: the channel, the lane in it, and the clip's id in the lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Hash))]
 pub struct ClipRef {
     pub channel: usize,
     pub lane: usize,
@@ -257,6 +260,40 @@ impl ClipRef {
     fn edit(self) -> Nav {
         Nav::EditClip(self.into())
     }
+}
+
+// Diagnostic-only switch for the full-frame A/B harness. Release builds do not compile this path.
+#[cfg(test)]
+thread_local! {
+    static PROFILE_INDEXED_RETENTION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run one headless frame with the candidate per-frame selection index; test-only, never used by the application.
+#[cfg(test)]
+pub(crate) fn with_profile_indexed_retention<R>(enabled: bool, f: impl FnOnce() -> R) -> R {
+    PROFILE_INDEXED_RETENTION.with(|mode| {
+        let old = mode.replace(enabled);
+        let result = f();
+        mode.set(old);
+        result
+    })
+}
+
+#[cfg(test)]
+fn profile_live_clip_refs(song: &Song) -> HashSet<ClipRef> {
+    song.channels
+        .iter()
+        .enumerate()
+        .flat_map(|(channel, ch)| {
+            ch.lanes.iter().enumerate().flat_map(move |(lane, lane_data)| {
+                lane_data.clips.iter().map(move |clip| ClipRef {
+                    channel,
+                    lane,
+                    id: clip.id,
+                })
+            })
+        })
+        .collect()
 }
 
 /// The same clip, as the editors name it.
@@ -514,9 +551,26 @@ impl Clips {
         // A clip that went away (undo, another song), or whose track no longer shows (`Hide track`), takes its selection
         // and gesture with it.
         let show = app.settings.show_hidden_tracks;
+        // Test-only alternate for a controlled full-frame A/B. Building this HashSet is part of each frame's cost.
+        #[cfg(test)]
+        let live_refs = PROFILE_INDEXED_RETENTION.with(|mode| {
+            (mode.get() && (self.selected.is_some() || !self.group.is_empty()))
+                .then(|| profile_live_clip_refs(app.song))
+        });
         let kept = |r: ClipRef| {
-            find(app.song, r).is_some()
-                && (show || !app.song.channels[r.channel].lanes[r.lane].hidden)
+            let exists = {
+                #[cfg(test)]
+                {
+                    live_refs
+                        .as_ref()
+                        .map_or_else(|| find(app.song, r).is_some(), |refs| refs.contains(&r))
+                }
+                #[cfg(not(test))]
+                {
+                    find(app.song, r).is_some()
+                }
+            };
+            exists && (show || !app.song.channels[r.channel].lanes[r.lane].hidden)
         };
         if self.selected.is_some_and(|r| !kept(r)) {
             self.deselect();
@@ -2525,6 +2579,63 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
 }
 
+// Test-only counters make cache behavior observable without changing release builds or cache policy.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct WaveMeshProfileStats {
+    pub hits: usize,
+    pub misses: usize,
+    pub inserts: usize,
+    pub evictions: usize,
+    pub expired: usize,
+    pub bypasses: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    static WAVE_MESH_PROFILE: std::cell::Cell<WaveMeshProfileStats> =
+        const { std::cell::Cell::new(WaveMeshProfileStats { hits: 0, misses: 0, inserts: 0, evictions: 0, expired: 0, bypasses: 0 }) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_wave_mesh_profile() {
+    WAVE_MESH_PROFILE.with(|stats| stats.set(WaveMeshProfileStats::default()));
+}
+
+#[cfg(test)]
+pub(crate) fn wave_mesh_profile_stats() -> WaveMeshProfileStats {
+    WAVE_MESH_PROFILE.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn reset_wave_mesh_cache() {
+    WAVE_MESHES.with(|cache| cache.borrow_mut().clear());
+    reset_wave_mesh_profile();
+}
+
+#[cfg(test)]
+pub(crate) fn wave_mesh_cache_size() -> (usize, usize) {
+    WAVE_MESHES.with(|cache| {
+        let cache = cache.borrow();
+        (
+            cache.len(),
+            cache.iter().map(|entry| mesh_bytes(&entry.mesh)
+                + entry.volume.as_ref().map_or(0, |v| v.memory_bytes())
+                + entry.stereo.as_ref().map_or(0, |s| s.iter().map(|v| v.memory_bytes()).sum::<usize>())
+            ).sum(),
+        )
+    })
+}
+
+#[cfg(test)]
+fn record_wave_mesh_profile(update: impl FnOnce(&mut WaveMeshProfileStats)) {
+    WAVE_MESH_PROFILE.with(|stats| {
+        let mut next = stats.get();
+        update(&mut next);
+        stats.set(next);
+    });
+}
+
 fn mesh_bytes(mesh: &Mesh) -> usize {
     mesh.vertices.len() * std::mem::size_of::<egui::epaint::Vertex>()
         + mesh.indices.len() * std::mem::size_of::<u32>()
@@ -2658,7 +2769,16 @@ fn stereo_wave_mesh(
     };
     if let Some(mesh) = WAVE_MESHES.with(|cache| {
         let mut cache = cache.borrow_mut();
+        #[cfg(test)]
+        let before = cache.len();
         cache.retain(|entry| entry.data.strong_count() > 0 && entry.summary.strong_count() > 0);
+        #[cfg(test)]
+        {
+            let expired = before - cache.len();
+            if expired > 0 {
+                record_wave_mesh_profile(|stats| stats.expired += expired);
+            }
+        }
         let at = cache.iter().position(|entry| {
             entry.data.ptr_eq(&std::sync::Arc::downgrade(&source.data))
                 && entry
@@ -2678,8 +2798,15 @@ fn stereo_wave_mesh(
                     _ => false,
                 }
                 && entry.rows == rows
-        })?;
-        let hit = cache.remove(at)?;
+        });
+        let Some(at) = at else {
+            #[cfg(test)]
+            record_wave_mesh_profile(|stats| stats.misses += 1);
+            return None;
+        };
+        #[cfg(test)]
+        record_wave_mesh_profile(|stats| stats.hits += 1);
+        let hit = cache.remove(at).expect("cache entry position was found");
         let mesh = hit.mesh.clone();
         cache.push_back(hit);
         Some(mesh)
@@ -2758,6 +2885,8 @@ fn stereo_wave_mesh(
     if retained_bytes <= BUDGET {
         WAVE_MESHES.with(|cache| {
             let mut cache = cache.borrow_mut();
+            #[cfg(test)]
+            let mut evictions = 0;
             while cache.len() >= 256
                 || cache
                     .iter()
@@ -2774,7 +2903,16 @@ fn stereo_wave_mesh(
                     > BUDGET
             {
                 cache.pop_front();
+                #[cfg(test)]
+                {
+                    evictions += 1;
+                }
             }
+            #[cfg(test)]
+            record_wave_mesh_profile(|stats| {
+                stats.evictions += evictions;
+                stats.inserts += 1;
+            });
             cache.push_back(CachedWaveMesh {
                 data: std::sync::Arc::downgrade(&source.data),
                 summary: std::sync::Arc::downgrade(&source.summary),
@@ -2785,6 +2923,9 @@ fn stereo_wave_mesh(
                 mesh: mesh.clone(),
             });
         });
+    } else {
+        #[cfg(test)]
+        record_wave_mesh_profile(|stats| stats.bypasses += 1);
     }
     mesh
 }

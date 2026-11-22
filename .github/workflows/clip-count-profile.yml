@@ -2,7 +2,7 @@ name: High clip count investigation
 on:
   push:
     branches: ['arena/**']
-    paths: ['.github/workflows/clip-count-profile.yml', 'src/ui/clips/count_profile.rs']
+    paths: ['.github/workflows/clip-count-profile.yml', 'src/ui/clips.rs', 'src/ui/clips/count_profile.rs', 'src/app/tests/count_profile.rs']
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,7 +22,7 @@ jobs:
       - name: Build attribution harness outside measurements
         run: |
           mkdir -p measurements
-          rustfmt --edition 2024 src/ui/clips/count_profile.rs src/app/tests/count_profile.rs
+          rustfmt --edition 2024 src/ui/clips.rs src/ui/clips/count_profile.rs src/app/tests/count_profile.rs
           cargo test --release --lib high_clip_count_ --no-run > measurements/build.log 2>&1 || { tail -100 measurements/build.log; exit 1; }
       - name: Measure production helpers and offline engine
         run: |

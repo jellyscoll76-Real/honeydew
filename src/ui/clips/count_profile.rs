@@ -74,8 +74,16 @@ pub(crate) fn fixture(kind: &'static str, hits: usize) -> Fixture {
                 }).collect();
             }
             "drums_steps" | "drums_notes" => {
-                c.events = vec![Event::Drum { pos: 0, len_beats: 0.125, pad: (i % 4) as u8,
-                    velocity: 100, pan: 64, value: 0, repeat: 0 }];
+                // The 16-long-clip control carries the same ordered drum hits as the dense short-clip case.
+                c.events = (0..per_clip).map(|j| Event::Drum {
+                    pos: (j * PPQ as usize / 4) as u32,
+                    len_beats: 0.125,
+                    pad: ((i * per_clip + j) % 4) as u8,
+                    velocity: 100,
+                    pan: 64,
+                    value: 0,
+                    repeat: 0,
+                }).collect();
             }
             "empty" => {}
             _ => {

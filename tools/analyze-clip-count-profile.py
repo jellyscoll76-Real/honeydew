@@ -12,14 +12,14 @@ assert rows, 'No measurements found'
 destination.mkdir(parents=True, exist_ok=True)
 (destination / 'data.json').write_text(json.dumps(rows, indent=2) + '\n')
 lines = ['# High clip count: controlled headless attribution', '',
-         'Linux release build; test-only allocation instrumentation. Candidate HashSet indexing is measured in the harness only; production remains unchanged.',
-         '**Not Android FPS, GPU timing, full-app input latency or hardware xrun measurements.**',
+         'Linux release build; test-only allocation and waveform-cache instrumentation. Candidate HashSet indexing is measured only in test builds; production remains unchanged.',
+         '**Not Android FPS, GPU timing, physical-touch latency or hardware xrun measurements.** Scripted interaction times are synthetic headless desktop event sequences.',
          'Paint includes production clip lookup, cached asset lookup, egui shape construction and text; tessellation is separate.',
          'Layout and explicit lookup/selection/hit probes are independent diagnostic passes, not additive full-app phases.',
          'The composite p50/p95/p99 includes extra all-selected and lookup probes even in idle mode. Do not treat it as a real frame.',
          'Scroll changes the axis only; selection measures actual ID resolution, not complete gestures/edit rebuilds.', '',
          'A/B synthesize the same pulse sequence (6000 PCM frames per pulse at 48 kHz); long clips concatenate pulses.',
-         'Durations/hit counts match within a comparison; notes/drums are UI fixture controls, not acoustic equivalents.',
+         'Durations/hit counts match within a comparison; short and 16-long drum patterns carry the same ordered drum events (four pads), while notes/drums remain UI fixture controls rather than acoustic engine equivalents.',
          'Each UI entry is the median across three runs of 24 warm samples; fixture construction and cold decode are excluded.', '',
          '## UI helpers (milliseconds per diagnostic frame)', '',
          '| Case | Hits | Clips | View | Motion | Visible | Layout | Lookup | All-selected lookup | Candidate index build | Indexed lookup | Indexed all-selected | Rect hit scan | Paint | Tessellate | Alloc calls | Requested KiB |',
@@ -43,11 +43,18 @@ for r in rows:
     if r['phase'] == 'offline_audio':
         lines.append(f'| {r["case"]} | {r["hits"]} | {r["clips"]} | {r["prepare_ms"]:.3f} | {r["p50_ms"]:.4f} | {r["p95_ms"]:.4f} | {r["p99_ms"]:.4f} | {r["over_budget_blocks"]} | {r["energy"]:.3f} | {r["rss_kib"]} |')
 lines += ['', '## Full-app headless frames (milliseconds per frame; fake audio sink, no GPU)', '',
-          'Complete BanaForgeApp frames via the test Rig: UI pass plus separate egui tessellation. Recorder is a fake sink; **not hardware playback, device FPS or input latency**.', '',
-          '| Case | Hits | Clips | View | Mode | UI p50 | UI p95 | UI p99 | Tess p50 | Tess p95 |', '|---|---:|---:|---|---|---:|---:|---:|---:|---:|']
+          'Complete BanaForgeApp frames via the test Rig: UI pass plus separate egui tessellation. Recorder is a fake sink; **not hardware playback, device FPS or physical input latency**.', '',
+          '| Case | Hits | Clips | View | Mode | UI p50 | UI p95 | UI p99 | Tess p50 | Tess p95 | Cache hits | misses | evictions |', '|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|']
 for r in rows:
     if r['phase'] == 'full_app_cpu':
-        lines.append(f"| {r['case']} | {r['hits']} | {r['clips']} | {r['view']} | {r['mode']} | {r['ui_p50_ms']:.3f} | {r['ui_p95_ms']:.3f} | {r['ui_p99_ms']:.3f} | {r['tess_p50_ms']:.3f} | {r['tess_p95_ms']:.3f} |")
+        lines.append(f"| {r['case']} | {r['hits']} | {r['clips']} | {r['view']} | {r['mode']} | {r['ui_p50_ms']:.3f} | {r['ui_p95_ms']:.3f} | {r['ui_p99_ms']:.3f} | {r['tess_p50_ms']:.3f} | {r['tess_p95_ms']:.3f} | {r['wave_cache_hits']} | {r['wave_cache_misses']} | {r['wave_cache_evictions']} |")
+lines += ['', 'For all-selected modes, `all_selected_indexed` is a test-only full-frame candidate HashSet path; it builds the set each frame. Compare it only with `all_selected` at identical fixture/view and include both timings as the end-to-end A/B.', '',
+          '## Scripted full-app interactions (milliseconds per complete synthetic event sequence)', '',
+          'Five repeats each at 4096 clips; sequence timing includes egui app frames and rig input dispatch. This is Linux desktop/headless diagnostic timing, not physical touch latency or Android performance.', '',
+          '| Case | Clips | Action | Median | Five totals (ms) |', '|---|---:|---|---:|---|']
+for r in rows:
+    if r['phase'] == 'scripted_interaction':
+        lines.append(f"| {r['case']} | {r['clips']} | {r['action']} | {r['median_ms']:.3f} | {', '.join(f'{x:.3f}' for x in r['total_ms'])} |")
 lines += ['', 'Cold asset read counts, lazy summary timings, per-case RSS, process CPU time, shape/vertex counts and allocation requests are in data.json.',
           'Allocation bytes count requests/reallocations, not live memory; RSS is process-wide with retained allocator/cache memory, not isolated fixture ownership.',
           'resources.txt records whole-test CPU/peak RSS, excluding compilation. No claims of musical-output equivalence or actual playback stability follow from these measurements.']
@@ -73,7 +80,14 @@ for r in rows:
         summary['full_app_cpu'][f"{r['case']}|{r['hits']}|{r['view']}|{r['mode']}"] = {
             'clips': r['clips'], 'ui_p50_ms': round(r['ui_p50_ms'], 4),
             'ui_p95_ms': round(r['ui_p95_ms'], 4), 'ui_p99_ms': round(r['ui_p99_ms'], 4),
-            'tess_p50_ms': round(r['tess_p50_ms'], 4), 'tess_p95_ms': round(r['tess_p95_ms'], 4)}
+            'tess_p50_ms': round(r['tess_p50_ms'], 4), 'tess_p95_ms': round(r['tess_p95_ms'], 4),
+            'wave_cache_hits': r['wave_cache_hits'], 'wave_cache_misses': r['wave_cache_misses'],
+            'wave_cache_inserts': r['wave_cache_inserts'], 'wave_cache_evictions': r['wave_cache_evictions'],
+            'wave_cache_expired': r['wave_cache_expired'], 'wave_cache_bypasses': r['wave_cache_bypasses'],
+            'wave_cache_entries': r['wave_cache_entries'], 'wave_cache_bytes': r['wave_cache_bytes']}
+    elif r['phase'] == 'scripted_interaction':
+        summary.setdefault('scripted_interaction', []).append({k: (round(v, 4) if isinstance(v, float) else v)
+            for k, v in r.items() if k != 'phase'})
     elif r['phase'] == 'offline_audio':
         summary['offline_audio'].append({k: (round(v, 4) if isinstance(v, float) else v)
             for k, v in r.items() if k != 'phase'})
