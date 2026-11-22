@@ -49,7 +49,7 @@ use crate::song::{
 use crate::theme::{Rgba, Theme, ThemeColors, channel_color};
 use crate::ui::audio_editor::{self, Action, Wave, columns, stretch_of, stretch_ratio, wave_rows};
 use crate::ui::automation::pop_scale;
-use crate::ui::buttons::action_bubble_button;
+use crate::ui::buttons::{action_bubble_button, bubble_button};
 use crate::ui::edit_keys::{self, EditKey};
 use crate::ui::graph_lane::{grow, press_growth};
 use crate::ui::insert::{self, Tap};
@@ -178,8 +178,9 @@ const PULSE: [f32; 3] = [0.15, 0.05, 0.0125];
 /// The handles' pop-in: a ← 0.6·a per frame.
 const HANDLE_RATE: f32 = 0.6;
 /// Floating-menu bubbles have a 0.2 U gap, with room for their pop-in animation.
-pub(crate) const BUTTON_D: f32 = 1.5;
-const ROW_SLOT: f32 = 1.75;
+pub(crate) const BUTTON_D: f32 = 1.4;
+const LANE_BUTTON_D: f32 = 1.5;
+const ROW_SLOT: f32 = 1.6;
 const ROW_M: f32 = 0.2;
 /// Labels shrink until each fits this share of a button's diameter.
 const LABEL_FIT: f32 = 0.85;
@@ -3362,6 +3363,12 @@ fn paste_clips(
     let mut next_ids = std::collections::HashMap::new();
     for entry in clips {
         let (r, k, clip) = (entry.source, entry.kind, &entry.clip);
+        let required_pad = if foreign && k == LaneKind::Drums {
+            clip.events.iter().filter_map(|event| match event {
+                Event::Drum { pad, .. } => Some(usize::from(*pad)),
+                _ => None,
+            }).max()
+        } else { None };
         let destination = if foreign {
             // Automation targets contain project-local module/pad ids. Without an
             // unambiguous binding, skipping is safer than driving an unrelated control.
@@ -3373,7 +3380,10 @@ fn paste_clips(
                 let lane = &ch.lanes[*l];
                 lane.kind == k && (show_hidden || !lane.hidden) && match k {
                     LaneKind::Notes => matches!(ch.kind, ChannelKind::Instrument | ChannelKind::Synth(_) | ChannelKind::Rack),
-                    LaneKind::Drums => ch.kind == ChannelKind::Drums,
+                    LaneKind::Drums => ch.kind == ChannelKind::Drums
+                        && ch.drum_kit.as_ref().is_some_and(|kit| {
+                            required_pad.is_none_or(|pad| pad < kit.slots.len())
+                        }),
                     LaneKind::Audio => true,
                     LaneKind::Automation => false,
                 }
@@ -4015,7 +4025,16 @@ impl FloatingRow {
         let (c, m) = (&cx.theme.colors, cx.m);
         // Keep targets at least 44 logical points where possible. Wrap rather
         // than hide or shrink six actions off the edge of a small phone.
-        let (columns, slot, size) = action_row_layout(view.grid.width(), labels.len(), m.u(ROW_SLOT), m.u(ROW_M));
+        let lane_actions = id == "clip_button";
+        let (columns, slot, size) = if lane_actions {
+            let mut layout = action_row_layout(view.grid.width(), labels.len(), m.u(1.75), m.u(ROW_M));
+            if layout.2.y > view.grid.height() {
+                layout = action_row_layout(view.grid.width(), labels.len(), 44.0, m.u(ROW_M));
+            }
+            layout
+        } else {
+            (labels.len().max(1), m.u(ROW_SLOT), vec2(m.u(ROW_SLOT) * labels.len() as f32, m.u(1.5)))
+        };
         let px = 1.0 / m.ppp();
         let was = self.drawn.is_some();
         self.drawn = (self.anchor.zip(sel))
@@ -4030,21 +4049,25 @@ impl FloatingRow {
         if a > 0.0 || self.feedback.is_some() {
             ui.ctx().request_repaint();
         }
-        let (d, scale) = (m.u(BUTTON_D).min(slot * 0.86), row_pop_scale(a));
+        let d = if lane_actions { m.u(LANE_BUTTON_D).min(slot * 0.86) } else { m.u(BUTTON_D) };
+        let scale = row_pop_scale(a);
         let font = label_font(ui.ctx(), m, d, labels);
         let mut clicked = None;
         for (i, &label) in labels.iter().enumerate() {
             let center = pos2(
                 row.left() + ((i % columns) as f32 + 0.5) * slot,
-                row.top() + ((i / columns) as f32 + 0.5) * slot,
+                if lane_actions { row.top() + ((i / columns) as f32 + 0.5) * slot } else { row.center().y },
             );
             // Light floating-row bubbles, not `background` discs in a `text` ring. The button takes its full disc
             // while it pops in.
             let button = Id::new((id, i));
             let flash = self.feedback.is_some_and(|(pressed, _)| pressed == i);
-            if action_bubble_button(ui, button, center, d, slot, scale, flash, label, font.clone(), c).clicked()
-                && !self.dismiss
-            {
+            let pressed = if lane_actions {
+                action_bubble_button(ui, button, center, d, slot, scale, flash, label, font.clone(), c).clicked()
+            } else {
+                bubble_button(ui, button, center, d, scale, label, font.clone(), c).clicked()
+            };
+            if pressed && !self.dismiss {
                 self.feedback = Some((i, now));
                 ui.ctx().request_repaint();
                 clicked = Some((i, center));
@@ -4294,6 +4317,23 @@ mod tests {
         let lane = &target.channels[nearest.0].lanes[nearest.1];
         assert_eq!(lane.clips.len(), 2);
         assert_ne!(lane.clips[0].id, lane.clips[1].id);
+    }
+
+    #[test]
+    fn cross_project_drums_skip_racks_without_the_referenced_pads() {
+        let (_, mut state) = copied_source();
+        state.clipboard.retain(|entry| entry.kind == LaneKind::Drums);
+        let mut target = Song::default();
+        target.add_channel(ChannelKind::Drums);
+        target.channels[1].drum_kit.as_mut().unwrap().slots.truncate(1);
+        let before = target.clone();
+        assert!(paste_clips(&mut target, &state.clipboard, true, 0.0, (1, 0), 128.0, false).is_empty());
+        assert_eq!(target, before);
+        target.add_channel(ChannelKind::Drums);
+        let out = paste_clips(&mut target, &state.clipboard, true, 0.0, (1, 0), 128.0, false);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].channel, 2);
+        assert!(target.channels[1].lanes[0].clips.is_empty());
     }
 
     #[test]

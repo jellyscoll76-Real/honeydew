@@ -3793,6 +3793,8 @@ mod tests {
         rig.click(CLIP);
         let synth = lit([203.0, 357.0], 2.0);
         assert_eq!(outlines(&rig.frame(vec![])), [synth]);
+        // Dismiss the larger action row before targeting the clip beneath it.
+        rig.screen.clips.row.hide();
         // A long press selects the Drums clip with its handles; the current clip stays the only one outlined.
         rig.long_press(pos2(120.0, 144.0));
         let drums = ClipRef {
@@ -4714,12 +4716,12 @@ mod tests {
         let first = radii(&shown);
         assert_eq!(first.len(), 6, "{first:?}");
         assert!(first.iter().all(|&r| r < 1.0), "{first:?}");
-        // 0.1 s on (6 frames at 60 Hz): past full size; then radius 22.4 points (diameter 1.4 U).
+        // 0.1 s on (6 frames at 60 Hz): past full size; then radius 24 points (diameter 1.5 U).
         let next = radii(&rig.frame(vec![]));
-        assert!(next.iter().all(|&r| r > 22.4), "{next:?}");
+        assert!(next.iter().all(|&r| r > 24.0), "{next:?}");
         let settled = radii(&rig.frame(vec![]));
         assert!(
-            settled.iter().all(|&r| (r - 22.4).abs() < 1e-3),
+            settled.iter().all(|&r| (r - 24.0).abs() < 1e-3),
             "{settled:?}"
         );
     }
@@ -4939,6 +4941,8 @@ mod tests {
         // The drum clip selected; the second finger lands while the first holds the synth clip.
         rig.long_press(pos2(CLIP.x, 144.0));
         assert_eq!(rig.screen.clips.selected, Some(DRUM_CLIP));
+        // This tests the grid pinch, not the enlarged toolbar over the next row.
+        rig.screen.clips.row.hide();
         let other = CLIP + vec2(300.0, 0.0);
         rig.frame(vec![egui::Event::PointerMoved(CLIP)]);
         rig.frame(finger(1, Start, CLIP));

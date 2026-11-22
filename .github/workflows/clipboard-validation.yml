@@ -47,7 +47,7 @@ jobs:
           print('::notice title=Test summaries::'+'; '.join(summaries))
           parts=[]
           for i,line in enumerate(lines):
-              if any(x in line for x in ('error[','error:', 'FAILED', 'panicked', 'failures:')):
+              if any(x in line for x in ('error[','error:', 'panicked')):
                   parts.extend(lines[max(0,i-2):i+15])
           message='\n'.join(parts)[-50000:]
           for i in range(0,len(message),3000):
