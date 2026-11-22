@@ -1,6 +1,8 @@
 # Identify the installed Bana Forge safely
 
-**Current result: unknown.** This workspace has no connected Android device/ADB toolchain. Neither the installed version nor its public certificate can be inferred from the last download, project files, APK filename or repository version. Do not reinstall an old APK to check it.
+**Current result: the owner confirmed v0.5.32 in Android Settings; its installed public certificate and numeric versionCode are still unmeasured.** This workspace has no connected Android device/ADB toolchain. The certificate cannot be inferred from the last download, project files, APK filename or repository version. Do not reinstall an old APK to check it.
+
+**Only have an Android phone? Use [the phone-only certificate guide](ANDROID_PHONE_IDENTITY.md)** instead of the computer steps below. It links an existing diagnostic APK, not a new Bana Forge build.
 
 The APK distribution hold remains active. This procedure builds/installs nothing, accesses no app project/settings directories, and needs no private key or keystore password.
 

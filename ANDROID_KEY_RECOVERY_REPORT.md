@@ -2,7 +2,7 @@
 
 Status: **release hold; no key recovered; no new APK built or distributed**.
 
-This report supplements [ANDROID_UPDATE_SAFETY.md](ANDROID_UPDATE_SAFETY.md). A displayed version alone does not identify the installed signer. The owner's device has not been inspected.
+This report supplements [ANDROID_UPDATE_SAFETY.md](ANDROID_UPDATE_SAFETY.md). A displayed version alone does not identify the installed signer. The owner subsequently confirmed **installed v0.5.32 in Android Settings**, but its public certificate/versionCode have not been measured. See [the Android-only identity procedure](ANDROID_PHONE_IDENTITY.md); priority is recovery of a key matching that actual installation, not any key for the same version name. The owner's device has not been remotely inspected.
 
 ## 1. Recovery investigation and limits
 
