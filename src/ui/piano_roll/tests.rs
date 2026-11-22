@@ -3001,6 +3001,27 @@ mod component {
         assert!(rig.all.is_empty());
     }
 
+    #[test]
+    #[ignore]
+    fn ui_responsiveness_profile_dense_roll() {
+        for count in [1000, 10000, 50000] {
+            let notes = (0..count).map(|i| n(i * 32, 64.0, 60 + (i % 12) as u8)).collect();
+            let mut rig = Rig::new(notes);
+            for _ in 0..8 { rig.frame(vec![]); }
+            let before = rig.events().to_vec();
+            let mut times = Vec::new();
+            for i in 0..120 {
+                let start = std::time::Instant::now();
+                rig.frame(vec![In::PointerMoved(pos2(300.0 + (i % 40) as f32, 250.0))]);
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+            }
+            assert_eq!(rig.events(), before);
+            times.sort_by(f64::total_cmp);
+            println!("PROFILE roll notes={count} frames=120 median_ms={:.6} p95_ms={:.6} p99_ms={:.6} over_16ms={}",
+                times[60], times[114], times[118], times.iter().filter(|t| **t > 16.667).count());
+        }
+    }
+
     // ---- note menu: scale, slide, transpose ----
 
     /// Selects every note, opens `More...` and taps `item`.

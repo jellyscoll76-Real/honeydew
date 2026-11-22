@@ -257,4 +257,20 @@ mod tests {
         assert_eq!(truncate("AVAVAV", 5, 4.9, 5.0, 1.5, w), "AV...V");
         assert_eq!(truncate("AVAVAV", 5, 4.4, 5.0, 1.5, w), "A...V");
     }
+    #[test]
+    #[ignore]
+    fn ui_responsiveness_profile_long_labels() {
+        for size in [128, 2048, 8192] {
+            let text = "音a".repeat(size / 2);
+            let mut times = Vec::new();
+            for _ in 0..40 {
+                let start = std::time::Instant::now();
+                std::hint::black_box(truncate(&text, 5, 40.0, size as f32, 3.0, |_| 1.0));
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+            }
+            times.sort_by(f64::total_cmp);
+            println!("PROFILE labels chars={size} median_ms={:.6} p95_ms={:.6}", times[20], times[38]);
+        }
+    }
+
 }
