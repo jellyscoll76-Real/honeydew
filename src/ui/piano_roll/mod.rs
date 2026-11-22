@@ -1210,6 +1210,18 @@ impl PianoRoll {
         let events = self.clip(song).map_or(&[][..], |c| &c.events);
         if events != self.seen.as_slice() || self.selected.len() != events.len() {
             self.seen = events.to_vec();
+            self.note_end_prefix.clear();
+            self.seen_vocal_notes = self
+                .clip(song)
+                .map_or_else(Vec::new, |clip| clip.file.vocal_notes.clone());
+            self.selected = vec![false; events.len()];
+            // A dragged key stops; the change (an undo) has dealt with the edit.
+            if let Gesture::Edit(edit) = std::mem::take(&mut self.gesture) {
+                self.stop_sound(&edit, &mut actions);
+            }
+            self.graph_drag = None;
+        }
+        if self.note_end_prefix.len() != events.len() {
             let mut furthest = 0.0_f64;
             self.note_end_prefix = events
                 .iter()
@@ -1220,15 +1232,6 @@ impl PianoRoll {
                     furthest
                 })
                 .collect();
-            self.seen_vocal_notes = self
-                .clip(song)
-                .map_or_else(Vec::new, |clip| clip.file.vocal_notes.clone());
-            self.selected = vec![false; events.len()];
-            // A dragged key stops; the change (an undo) has dealt with the edit.
-            if let Gesture::Edit(edit) = std::mem::take(&mut self.gesture) {
-                self.stop_sound(&edit, &mut actions);
-            }
-            self.graph_drag = None;
         }
         let panel = match self.menu {
             Some(Menu::Generate(panel)) => Some(panel),
@@ -1629,6 +1632,10 @@ impl PianoRoll {
         let events = self.clip(song).map_or(&[][..], |c| &c.events);
         self.selected = crate::app::live::follow(&self.seen, &self.selected, events, Event::pos);
         self.seen = events.to_vec();
+        // `follow` accepts outside edits into `seen`; invalidate the old index
+        // even when the note count stayed the same. The normal show path can
+        // rebuild it without treating the accepted edit as a selection reset.
+        self.note_end_prefix.clear();
         self.seen_vocal_notes = self
             .clip(song)
             .map_or_else(Vec::new, |clip| clip.file.vocal_notes.clone());

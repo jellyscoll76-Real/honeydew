@@ -1,5 +1,5 @@
 name: UI responsiveness profiling
-# Compare the same release harness after indexed graph-lane culling.
+# Compare release timings and check accepted external-edit cache invalidation.
 on:
   push:
     branches: ["arena/**"]
