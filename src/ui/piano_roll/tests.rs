@@ -3003,16 +3003,19 @@ mod component {
 
     #[test]
     fn followed_same_count_edit_rebuilds_viewport_index_without_losing_selection() {
-        let mut rig = Rig::new(vec![n(0, 64.0, 60)]);
+        let mut rig = Rig::new(vec![n(0, 64.0, 60), n(128, 64.0, 64)]);
         rig.frame(vec![]);
-        rig.select(vec![true]);
-        assert_eq!(rig.roll.note_end_prefix, vec![64.0]);
-        rig.song.channels[1].lanes[0].clips[0].events = vec![n(0, 1024.0, 60)];
+        rig.select(vec![false, true]);
+        assert_eq!(rig.roll.note_end_prefix, vec![64.0, 192.0]);
+        rig.song.channels[1].lanes[0].clips[0].events =
+            vec![n(0, 1024.0, 60), n(128, 64.0, 64)];
         rig.roll.follow(&rig.song);
         assert!(rig.roll.note_end_prefix.is_empty());
+        // Existing follow semantics keep unchanged selected notes, not replaced ones.
+        assert_eq!(rig.roll.selected, vec![false, true]);
         rig.frame(vec![]);
-        assert_eq!(rig.roll.note_end_prefix, vec![1024.0]);
-        assert_eq!(rig.roll.selected, vec![true]);
+        assert_eq!(rig.roll.note_end_prefix, vec![1024.0, 1024.0]);
+        assert_eq!(rig.roll.selected, vec![false, true]);
     }
 
     #[test]

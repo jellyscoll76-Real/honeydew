@@ -1,5 +1,5 @@
 name: UI responsiveness profiling
-# Compare release timings and check accepted external-edit cache invalidation.
+# Compare release timings; verify selection of unchanged externally followed notes.
 on:
   push:
     branches: ["arena/**"]
