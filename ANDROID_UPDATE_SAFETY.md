@@ -1,6 +1,8 @@
 # Android update identity — v0.5.33 preparation (release blocked)
 
 Follow-up: [key recovery and migration assessment](ANDROID_KEY_RECOVERY_REPORT.md).
+Read-only device check: [identify the installed version and public certificate](ANDROID_INSTALLED_IDENTITY.md).
+Independent inventory: [complete backup/restore gaps and copy-only test plan](ANDROID_BACKUP_RESTORE_PLAN.md).
 APK distribution is explicitly held by `android/RELEASE_HOLD.md` pending owner review and a verified safe path.
 
 ## Verified cause in the delivered playtest APKs
