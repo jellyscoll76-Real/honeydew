@@ -1,3 +1,10 @@
+BanaForge 0.5.32 — cross-project clipboard and lane action touch polish
+
+- Retain owned playlist clip snapshots when switching projects. Cross-project audio, note-pattern and drum-pattern pastes find existing compatible lanes nearest their source playlist position, independently of the vertical cursor. No tracks/racks/instruments are created or replaced; unmatched clips are skipped. Drum racks must already contain the referenced pad slots. Same-project paste placement remains unchanged.
+- Append fresh-ID clip copies with original events, loop/trim/offset, sample references/settings, envelopes and per-clip metadata; allow audio overlap. Copied content survives repeated project switches, deselection and target track rekeys. Cross-project automation is skipped rather than accidentally binding source-project module IDs to unrelated controls.
+- Playlist Copy gives immediate snapshot plus brief pressed/release feedback, then dismisses the temporary lane toolbar. Reopening restores every action. Slightly larger bubbles and padded, non-overlapping touch cells apply to all six lane actions; narrow layouts wrap instead of hiding the menu. Other editors retain their previous toolbar dimensions and operations.
+- Add clipboard/project-load/undo, routing/overlap/data-invariance and touch-feedback/layout regressions. Existing session note/hit/module clipboards and audio engine behavior are retained. Physical Android touch comfort and playback checks remain playtest acceptance items; see CROSS_PROJECT_CLIPBOARD_TESTING.md.
+
 BanaForge 0.5.31 — measured UI responsiveness pass
 
 - Profile the release UI harness before changing rendering. Replace quadratic long-label truncation with linear width maintenance: the isolated 8,192-character Unicode case fell from about 27.06 ms to 0.016 ms on CI. Preserve existing ellipsis/Unicode behavior.

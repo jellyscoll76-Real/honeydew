@@ -55,8 +55,25 @@ jobs:
           PY
           cat /tmp/tests.log
           exit "$result"
+      - name: Compare isolated rack failure against pre-change source
+        if: failure()
+        run: |
+          git fetch --depth=1 origin 9fca7e2f5e1d9d5874b8abeab6edf0fb6aa58cf1
+          git restore --source=FETCH_HEAD --worktree --staged src/app.rs src/ui/clips.rs src/ui/buttons.rs src/ui/main_screen.rs src/app/tests/keymap_actions.rs Cargo.toml Cargo.lock
+          set +e
+          cargo test --lib app::tests::rack_wiring::a_note_effect_param_moved_in_the_frame_of_its_rebuild_makes_no_undo_step -- --exact --test-threads=1 > /tmp/clipboard-baseline-rack.log 2>&1
+          rc=$?
+          python3 - <<'PY'
+          import pathlib
+          lines=pathlib.Path('/tmp/clipboard-baseline-rack.log').read_text().splitlines()
+          text='\n'.join(lines[-45:])
+          print('::notice title=Pre-change isolated rack test::'+text.replace('%','%25').replace('\n','%0A').replace('\r','%0D'))
+          PY
+          exit "$rc"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: clipboard-validation-log
-          path: /tmp/tests.log
+          path: |
+            /tmp/tests.log
+            /tmp/clipboard-baseline-rack.log

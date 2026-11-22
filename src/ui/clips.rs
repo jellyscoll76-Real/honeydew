@@ -3383,30 +3383,46 @@ fn paste_clips(
     for entry in clips {
         let (r, k, clip) = (entry.source, entry.kind, &entry.clip);
         let required_pad = if foreign && k == LaneKind::Drums {
-            clip.events.iter().filter_map(|event| match event {
-                Event::Drum { pad, .. } => Some(usize::from(*pad)),
-                _ => None,
-            }).max()
-        } else { None };
+            clip.events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Drum { pad, .. } => Some(usize::from(*pad)),
+                    _ => None,
+                })
+                .max()
+        } else {
+            None
+        };
         let destination = if foreign {
             // Automation targets contain project-local module/pad ids. Without an
             // unambiguous binding, skipping is safer than driving an unrelated control.
             if k == LaneKind::Automation {
                 continue;
             }
-            tracks.iter().enumerate().filter(|(_, (c, l))| {
-                let ch = &song.channels[*c];
-                let lane = &ch.lanes[*l];
-                lane.kind == k && (show_hidden || !lane.hidden) && match k {
-                    LaneKind::Notes => matches!(ch.kind, ChannelKind::Instrument | ChannelKind::Synth(_) | ChannelKind::Rack),
-                    LaneKind::Drums => ch.kind == ChannelKind::Drums
-                        && ch.drum_kit.as_ref().is_some_and(|kit| {
-                            required_pad.is_none_or(|pad| pad < kit.slots.len())
-                        }),
-                    LaneKind::Audio => true,
-                    LaneKind::Automation => false,
-                }
-            }).min_by_key(|(order, _)| order.abs_diff(entry.order))
+            tracks
+                .iter()
+                .enumerate()
+                .filter(|(_, (c, l))| {
+                    let ch = &song.channels[*c];
+                    let lane = &ch.lanes[*l];
+                    lane.kind == k
+                        && (show_hidden || !lane.hidden)
+                        && match k {
+                            LaneKind::Notes => matches!(
+                                ch.kind,
+                                ChannelKind::Instrument | ChannelKind::Synth(_) | ChannelKind::Rack
+                            ),
+                            LaneKind::Drums => {
+                                ch.kind == ChannelKind::Drums
+                                    && ch.drum_kit.as_ref().is_some_and(|kit| {
+                                        required_pad.is_none_or(|pad| pad < kit.slots.len())
+                                    })
+                            }
+                            LaneKind::Audio => true,
+                            LaneKind::Automation => false,
+                        }
+                })
+                .min_by_key(|(order, _)| order.abs_diff(entry.order))
                 .map(|(_, &track)| track)
         } else if clips.len() == 1 && kind(song, channel, lane) == Some(k) {
             Some((channel, lane))
@@ -4056,13 +4072,18 @@ impl FloatingRow {
         // than hide or shrink six actions off the edge of a small phone.
         let lane_actions = id == "clip_button";
         let (columns, slot, size) = if lane_actions {
-            let mut layout = action_row_layout(view.grid.width(), labels.len(), m.u(1.75), m.u(ROW_M));
+            let mut layout =
+                action_row_layout(view.grid.width(), labels.len(), m.u(1.75), m.u(ROW_M));
             if layout.2.y > view.grid.height() {
                 layout = action_row_layout(view.grid.width(), labels.len(), 44.0, m.u(ROW_M));
             }
             layout
         } else {
-            (labels.len().max(1), m.u(ROW_SLOT), vec2(m.u(ROW_SLOT) * labels.len() as f32, m.u(1.5)))
+            (
+                labels.len().max(1),
+                m.u(ROW_SLOT),
+                vec2(m.u(ROW_SLOT) * labels.len() as f32, m.u(1.5)),
+            )
         };
         let px = 1.0 / m.ppp();
         let was = self.drawn.is_some();
@@ -4078,21 +4099,41 @@ impl FloatingRow {
         if a > 0.0 || self.feedback.is_some() {
             ui.ctx().request_repaint();
         }
-        let d = if lane_actions { m.u(LANE_BUTTON_D).min(slot * 0.86) } else { m.u(BUTTON_D) };
+        let d = if lane_actions {
+            m.u(LANE_BUTTON_D).min(slot * 0.86)
+        } else {
+            m.u(BUTTON_D)
+        };
         let scale = row_pop_scale(a);
         let font = label_font(ui.ctx(), m, d, labels);
         let mut clicked = None;
         for (i, &label) in labels.iter().enumerate() {
             let center = pos2(
                 row.left() + ((i % columns) as f32 + 0.5) * slot,
-                if lane_actions { row.top() + ((i / columns) as f32 + 0.5) * slot } else { row.center().y },
+                if lane_actions {
+                    row.top() + ((i / columns) as f32 + 0.5) * slot
+                } else {
+                    row.center().y
+                },
             );
             // Light floating-row bubbles, not `background` discs in a `text` ring. The button takes its full disc
             // while it pops in.
             let button = Id::new((id, i));
             let flash = self.feedback.is_some_and(|(pressed, _)| pressed == i);
             let pressed = if lane_actions {
-                action_bubble_button(ui, button, center, d, slot, scale, flash, label, font.clone(), c).clicked()
+                action_bubble_button(
+                    ui,
+                    button,
+                    center,
+                    d,
+                    slot,
+                    scale,
+                    flash,
+                    label,
+                    font.clone(),
+                    c,
+                )
+                .clicked()
             } else {
                 bubble_button(ui, button, center, d, scale, label, font.clone(), c).clicked()
             };
@@ -4440,15 +4481,41 @@ mod tests {
     #[test]
     fn cross_project_drums_skip_racks_without_the_referenced_pads() {
         let (_, mut state) = copied_source();
-        state.clipboard.retain(|entry| entry.kind == LaneKind::Drums);
+        state
+            .clipboard
+            .retain(|entry| entry.kind == LaneKind::Drums);
         let mut target = Song::default();
         target.add_channel(ChannelKind::Drums);
-        target.channels[1].drum_kit.as_mut().unwrap().slots.truncate(1);
+        target.channels[1]
+            .drum_kit
+            .as_mut()
+            .unwrap()
+            .slots
+            .truncate(1);
         let before = target.clone();
-        assert!(paste_clips(&mut target, &state.clipboard, true, 0.0, (1, 0), 128.0, false).is_empty());
+        assert!(
+            paste_clips(
+                &mut target,
+                &state.clipboard,
+                true,
+                0.0,
+                (1, 0),
+                128.0,
+                false
+            )
+            .is_empty()
+        );
         assert_eq!(target, before);
         target.add_channel(ChannelKind::Drums);
-        let out = paste_clips(&mut target, &state.clipboard, true, 0.0, (1, 0), 128.0, false);
+        let out = paste_clips(
+            &mut target,
+            &state.clipboard,
+            true,
+            0.0,
+            (1, 0),
+            128.0,
+            false,
+        );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].channel, 2);
         assert!(target.channels[1].lanes[0].clips.is_empty());
