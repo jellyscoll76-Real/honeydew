@@ -1,5 +1,8 @@
 name: UI responsiveness profiling
 on:
+  push:
+    branches: ["arena/**"]
+    paths: [".github/workflows/ui-responsiveness.yml"]
   workflow_dispatch:
 jobs:
   profile:
