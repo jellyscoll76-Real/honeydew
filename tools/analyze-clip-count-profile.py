@@ -51,10 +51,10 @@ for r in rows:
 lines += ['', 'For all-selected modes, `all_selected_indexed` is a test-only full-frame candidate HashSet path; it builds the set each frame. Compare it only with `all_selected` at identical fixture/view and include both timings as the end-to-end A/B.', '',
           '## Scripted full-app interactions (milliseconds per complete synthetic event sequence)', '',
           'Five repeats each at 4096 clips; sequence timing includes egui app frames and rig input dispatch. This is Linux desktop/headless diagnostic timing, not physical touch latency or Android performance.', '',
-          '| Case | Clips | Action | Median | Five totals (ms) | Effect each repeat | Handle response rect |', '|---|---:|---|---:|---|---|---|']
+          '| Case | Clips | Action | Median | Five totals (ms) | Effect each repeat | Resize diagnostic |', '|---|---:|---|---:|---|---|---|']
 for r in rows:
     if r['phase'] == 'scripted_interaction':
-        lines.append(f"| {r['case']} | {r['clips']} | {r['action']} | {r['median_ms']:.3f} | {', '.join(f'{x:.3f}' for x in r['total_ms'])} | {', '.join('yes' if x else 'no' for x in r['effect_observed'])} | {r['handle_response_rect'] or 'not registered'} |")
+        lines.append(f"| {r['case']} | {r['clips']} | {r['action']} | {r['median_ms']:.3f} | {', '.join(f'{x:.3f}' for x in r['total_ms'])} | {', '.join('yes' if x else 'no' for x in r['effect_observed'])} | {json.dumps(r['resize_details'], separators=(',', ':')) if r.get('resize_details') else '—'} |")
 lines += ['', 'Cold asset read counts, lazy summary timings, per-case RSS, process CPU time, shape/vertex counts and allocation requests are in data.json.',
           'Allocation bytes count requests/reallocations, not live memory; RSS is process-wide with retained allocator/cache memory, not isolated fixture ownership.',
           'resources.txt records whole-test CPU/peak RSS, excluding compilation. No claims of musical-output equivalence or actual playback stability follow from these measurements.']

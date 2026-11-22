@@ -13,6 +13,7 @@ fn high_clip_count_playlist_interactions() {
             let mut samples = Vec::new();
             let mut effects = Vec::new();
             let mut handle_rect = None;
+            let mut resize_details = None;
             for _ in 0..5 {
                 let mut rig = Rig::new();
                 rig.app.audio.samples.load(&fixture.song, &|_| Some(fixture.wav.clone()));
@@ -36,6 +37,7 @@ fn high_clip_count_playlist_interactions() {
                 }
                 let mut effect = false;
                 let mut current_handle_rect = None;
+                let mut current_resize_details = None;
                 let t = Instant::now();
                 match action {
                     "select_tap" => {
@@ -64,9 +66,14 @@ fn high_clip_count_playlist_interactions() {
                                 .is_some_and(|r| r.is_pointer_button_down_on());
                             rig.drag_to(from + vec2(28.0, 0.0));
                             rig.release(from + vec2(28.0, 0.0));
-                            let resized = rig.app.song.channels[1].lanes[0].clips.iter()
-                                .find(|clip| clip.id == original_id)
-                                .is_some_and(|clip| clip.visible_ticks() != original_len);
+                            let result_len = rig.app.song.channels[1].lanes[0].clips.iter()
+                                .find(|clip| clip.id == original_id).map(|clip| clip.visible_ticks());
+                            let resized = result_len.is_some_and(|len| len != original_len);
+                            current_resize_details = Some(serde_json::json!({
+                                "captured":captured, "old_visible_ticks":original_len,
+                                "new_visible_ticks":result_len, "press_at":format!("{:?}", from),
+                                "lane_rect":format!("{:?}", lane), "handle_rect":format!("{:?}", handle)
+                            }));
                             effect = captured && resized;
                         }
                     }
@@ -86,13 +93,15 @@ fn high_clip_count_playlist_interactions() {
                 samples.push(t.elapsed().as_secs_f64() * 1000.0);
                 effects.push(effect);
                 if current_handle_rect.is_some() { handle_rect = current_handle_rect; }
+                if current_resize_details.is_some() { resize_details = current_resize_details; }
             }
             samples.sort_by(f64::total_cmp);
             println!("CLIP_PROFILE {}", serde_json::json!({
                 "phase":"scripted_interaction", "case":kind, "clips":fixture.song.channels[1].lanes[0].clips.len(),
                 "action":action, "repeats":samples.len(), "total_ms":samples,
                 "median_ms":samples[samples.len()/2], "effect_observed":effects,
-                "handle_response_rect":handle_rect, "desktop_headless":true,
+                "handle_response_rect":handle_rect, "resize_details":resize_details,
+                "desktop_headless":true,
                 "fake_audio_sink":true, "hardware_xruns":null, "gpu_fps":null
             }));
         }
