@@ -3359,6 +3359,7 @@ fn paste_clips(
     let kind = |song: &Song, c: usize, l: usize| Some(song.channels.get(c)?.lanes.get(l)?.kind);
     let mut pasted = Vec::new();
     let tracks = playlist_lanes(song);
+    let mut next_ids = std::collections::HashMap::new();
     for entry in clips {
         let (r, k, clip) = (entry.source, entry.kind, &entry.clip);
         let destination = if foreign {
@@ -3391,8 +3392,12 @@ fn paste_clips(
         let mut copy = clip.clone();
         // `as` saturates at the last tick.
         copy.start_tick = (at + f64::from(clip.start_tick - first)).round() as u32;
-        let max_id = target.clips.iter().map(|c| c.id).max().unwrap_or(0).max(target.last_clip_id);
+        // Scan each destination once, not once per pasted clip in a dense group.
+        let max_id = next_ids.entry((c, l)).or_insert_with(|| {
+            target.clips.iter().map(|c| c.id).max().unwrap_or(0).max(target.last_clip_id)
+        });
         let Some(id) = max_id.checked_add(1) else { continue; };
+        *max_id = id;
         target.last_clip_id = id;
         copy.id = id;
         pasted.push(ClipRef {

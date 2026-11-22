@@ -328,6 +328,33 @@ mod tests {
     }
 
     #[test]
+    fn floating_action_target_includes_padding_and_pressed_feedback_changes_paint() {
+        let mut rig = Offscreen::new();
+        let draw = |rig: &mut Offscreen, flash: bool| {
+            rig.frame(vec![], &mut |ui, cx| {
+                action_bubble_button(ui, Id::new("action"), CENTER, 40.0, 56.0, 1.0, flash,
+                    "Copy", FontId::proportional(10.0), &cx.theme.colors);
+            }).into_iter().filter_map(|s| match s.shape {
+                egui::Shape::Circle(c) => Some((c.radius, c.fill)),
+                _ => None,
+            }).collect::<Vec<_>>()
+        };
+        let normal = draw(&mut rig, false);
+        let pressed = draw(&mut rig, true);
+        assert_eq!(normal.len(), 1);
+        assert_eq!(pressed.len(), 1);
+        assert!(pressed[0].0 > normal[0].0);
+        assert_ne!(pressed[0].1, normal[0].1);
+        let mut clicked = false;
+        // In touch padding, outside the visible circle (also outside its bounding square).
+        rig.click(CENTER + vec2(25.0, 0.0), &mut |ui, cx| {
+            clicked |= action_bubble_button(ui, Id::new("action"), CENTER, 40.0, 56.0, 1.0, false,
+                "Copy", FontId::proportional(10.0), &cx.theme.colors).clicked();
+        });
+        assert!(clicked);
+    }
+
+    #[test]
     fn a_click_counts_on_the_disc_but_not_in_the_squares_corner() {
         for (at, on_disc) in [(CENTER, true), (CENTER + Vec2::splat(D / 2.0 - 1.0), false)] {
             let mut rig = Offscreen::new();
