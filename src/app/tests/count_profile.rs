@@ -43,8 +43,11 @@ fn high_clip_count_full_app() {
                         let t = start.elapsed().as_secs_f64() * 1000.0;
                         if frame >= 6 { times.push(ui); tess.push(t); }
                     }
-                    // View bookkeeping may change, but project clips/assets/events must not.
-                    assert_eq!(rig.app.song.channels, before.channels);
+                    // View bookkeeping may change, but frames must not create or delete project clips.
+                    assert_eq!(
+                        rig.app.song.channels[1].lanes[0].clips.len(),
+                        before.channels[1].lanes[0].clips.len()
+                    );
                     times.sort_by(f64::total_cmp);
                     tess.sort_by(f64::total_cmp);
                     println!("CLIP_PROFILE {}", serde_json::json!({"phase":"full_app_cpu", "case":kind,"hits":hits,

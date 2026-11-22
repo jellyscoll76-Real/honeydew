@@ -27,10 +27,14 @@ jobs:
       - name: Measure production helpers and offline engine
         run: |
           lscpu > measurements/host.txt
-          /usr/bin/time -v -o measurements/resources.txt cargo test --release --lib high_clip_count_ -- --ignored --nocapture --test-threads=1 > measurements/profile.log 2>&1 || { tail -80 measurements/profile.log; exit 1; }
-          python3 tools/analyze-clip-count-profile.py measurements/profile.log measurements
-          cat measurements/REPORT.md >> "$GITHUB_STEP_SUMMARY"
-          python3 - <<'PYREAD'
+          set +e
+          RUST_BACKTRACE=1 /usr/bin/time -v -o measurements/resources.txt cargo test --release --lib high_clip_count_ -- --ignored --nocapture --test-threads=1 > measurements/profile.log 2>&1
+          code=$?
+          set -e
+          if [ -s measurements/profile.log ]; then python3 tools/analyze-clip-count-profile.py measurements/profile.log measurements || true; fi
+          if [ -f measurements/REPORT.md ]; then cat measurements/REPORT.md >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f measurements/data.json ]; then
+            python3 - <<'PYREAD'
           import pathlib, json, zlib, base64
           root=pathlib.Path('measurements')
           payload={n:(root/n).read_text() for n in ['data.json','host.txt','resources.txt']}
@@ -38,6 +42,12 @@ jobs:
           for i in range(0,len(packed),3500):
               print(f'::notice title=clip-profile-data-{i:08}::{packed[i:i+3500]}')
           PYREAD
+          fi
+          if [ "$code" -ne 0 ]; then
+            echo "::error::cargo test exited $code; last profile.log lines follow"
+            tail -40 measurements/profile.log | sed 's/^/::error::/' | head -40
+            exit "$code"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
