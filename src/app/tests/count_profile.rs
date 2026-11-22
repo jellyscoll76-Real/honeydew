@@ -25,7 +25,7 @@ fn high_clip_count_playlist_interactions() {
                 rig.frame(vec![]);
                 let lane_id = egui::Id::new(("clip_lane", 1_usize, 0_usize));
                 let lane = rig.ctx.read_response(lane_id).expect("playlist lane drawn").rect;
-                let clip_index = if kind == "audio_long" { 8 } else { 20 };
+                let clip_index = if kind == "audio_long" { 0 } else { 20 };
                 let start = pos2(lane.left() + clip_index as f32 * 10.0 + 5.0, lane.center().y);
                 let target = &fixture.song.channels[1].lanes[0].clips[clip_index];
                 let original_id = target.id;
