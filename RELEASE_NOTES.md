@@ -1,3 +1,10 @@
+BanaForge 0.5.31 — measured UI responsiveness pass
+
+- Profile the release UI harness before changing rendering. Replace quadratic long-label truncation with linear width maintenance: the isolated 8,192-character Unicode case fell from about 27.06 ms to 0.016 ms on CI. Preserve existing ellipsis/Unicode behavior.
+- Piano Roll graph stems/caps use the existing viewport index, retain edge-crossing notes and skip offscreen shape work. Preview edits retain the safe full scan. Fix stale viewport indexes after accepted same-count external edits without changing selection-follow semantics.
+- Add repeatable 1k/10k/50k-note and long-label profiling, release editor/text regressions and external-edit cache coverage. Detailed timings and physical-device acceptance checklist are in UI_RESPONSIVENESS_TESTING.md.
+- Audio processing, buffer/latency settings, MIDI scheduling and sound quality are unchanged. Headless CI timings are not Android FPS or touch-latency measurements; device frame pacing, playback/edit load and long-session testing remain required. Auto-Save defaults/behavior are retained.
+
 BanaForge 0.5.30 — opt-in interval Auto-Save
 
 - Auto-Save defaults OFF; interval defaults to 5:00 and can be entered as minutes:seconds (0:10–1440:00) in Settings → Application.
