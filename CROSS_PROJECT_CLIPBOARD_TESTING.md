@@ -46,3 +46,9 @@ Every playlist lane action dims and slightly grows while pressed. The separate P
 4. Exercise normal same-project copy/cut/paste, including groups, keyboard shortcuts and the touch insert-menu Paste.
 5. Tap Copy: confirm visible press/release feedback, exactly one copy and toolbar dismissal. Reopen it and verify all six actions, including More submenus and Edit navigation. Tap the padded area around each circle and drag off a button to cancel.
 6. Check wrapped toolbars remain visible and clear of editing handles on small screens, including with the keyboard/editor open. Repeat while playing and navigating quickly. Listen for audio regressions; automated geometry tests do not establish real-device touch comfort or frame pacing.
+
+## Regression investigation notes
+
+The initial enlarged shared-toolbar attempt exposed legacy geometry assumptions, so the new sizing/hit cells were scoped to the six playlist lane actions; Piano Roll, drum/step and automation toolbar geometry is unchanged. Playlist tests that intentionally target a grid clip underneath the now-larger toolbar dismiss that overlay first; press ownership still prevents accidental edits through the toolbar.
+
+One pre-existing rack test expected a click on a relative-drag Mix slider to produce a parameter change. The unchanged pre-feature source `9fca7e2` fails that isolated test as well (comparison workflow run 45011125624). The test now performs a real relative drag, keeping the parameter movement and rebuild shortcut in the same frame, so its original SetParam/handover/no-undo assertions remain meaningful. No rack control or audio-engine code was changed to satisfy it.

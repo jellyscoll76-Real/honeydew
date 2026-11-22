@@ -428,13 +428,15 @@ fn a_note_effect_param_moved_in_the_frame_of_its_rebuild_makes_no_undo_step() {
         egui::Key::Minus,
         egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
     );
-    rig.frame(vec![
-        Event::PointerMoved(mix),
-        button_event(mix, true),
-        button_event(mix, false),
-        minus,
-    ]);
-    rig.frame(vec![]);
+    // Sliders use relative drag, not click-to-jump. The old synthetic click
+    // changed no value, so it exercised neither SetParam nor handover (and
+    // failed identically on the pre-clipboard source).
+    rig.frame(vec![Event::PointerMoved(mix), button_event(mix, true)]);
+    rig.take();
+    let to = mix - vec2(U, 0.0);
+    // The parameter move and rebuild shortcut still happen in the same frame.
+    rig.frame(vec![Event::PointerMoved(to), minus]);
+    rig.frame(vec![button_event(to, false)]);
     let sent = rig.take();
     let set = sent
         .iter()
