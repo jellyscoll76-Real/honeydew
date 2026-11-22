@@ -26,10 +26,11 @@ fn high_clip_count_playlist_interactions() {
                 let original_id = fixture.song.channels[1].lanes[0].clips[0].id;
                 let original_start = fixture.song.channels[1].lanes[0].clips[0].start_tick;
                 let original_len = fixture.song.channels[1].lanes[0].clips[0].visible_ticks();
-                if action == "move_drag" {
+                if action == "move_drag" || action == "resize_drag" {
                     rig.press(start);
                     rig.release(start);
-                    for _ in 0..3 { rig.frame(vec![]); }
+                    for _ in 0..4 { rig.frame(vec![]); }
+                    assert!(rig.app.main_screen.clips.selected.is_some(), "clip must be selected before drag");
                 }
                 let t = Instant::now();
                 match action {
@@ -49,9 +50,6 @@ fn high_clip_count_playlist_interactions() {
                         assert_ne!(moved.start_tick, original_start, "body drag must move the first clip");
                     }
                     "resize_drag" => {
-                        rig.press(start);
-                        rig.release(start);
-                        rig.frame(vec![]);
                         let id = egui::Id::new(("clip_handle", crate::ui::clips::Part::End));
                         let handle = rig.ctx.read_response(id).expect("selected clip end handle drawn").rect;
                         let from = handle.center();

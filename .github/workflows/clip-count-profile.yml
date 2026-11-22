@@ -4,12 +4,20 @@ on:
     branches: ['arena/**']
     paths: ['.github/workflows/clip-count-profile.yml', 'src/ui/clips.rs', 'src/ui/clips/count_profile.rs', 'src/app/tests/count_profile.rs']
   workflow_dispatch:
+    inputs:
+      test_filter:
+        description: Rust test name filter (defaults to the complete clip-count profile)
+        required: false
+        default: high_clip_count_
+        type: string
 permissions:
   contents: read
 jobs:
   profile:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      TEST_FILTER: ${{ github.event.inputs.test_filter || 'high_clip_count_' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.91.0
@@ -23,12 +31,12 @@ jobs:
         run: |
           mkdir -p measurements
           rustfmt --edition 2024 src/ui/clips.rs src/ui/clips/count_profile.rs src/app/tests/count_profile.rs
-          cargo test --release --lib high_clip_count_ --no-run > measurements/build.log 2>&1 || { tail -100 measurements/build.log; exit 1; }
+          cargo test --release --lib "$TEST_FILTER" --no-run > measurements/build.log 2>&1 || { tail -100 measurements/build.log; exit 1; }
       - name: Measure production helpers and offline engine
         run: |
           lscpu > measurements/host.txt
           set +e
-          RUST_BACKTRACE=1 /usr/bin/time -v -o measurements/resources.txt cargo test --release --lib high_clip_count_ -- --ignored --nocapture --test-threads=1 > measurements/profile.log 2>&1
+          RUST_BACKTRACE=1 /usr/bin/time -v -o measurements/resources.txt cargo test --release --lib "$TEST_FILTER" -- --ignored --nocapture --test-threads=1 > measurements/profile.log 2>&1
           code=$?
           set -e
           if [ -s measurements/profile.log ]; then python3 tools/analyze-clip-count-profile.py measurements/profile.log measurements || true; fi
