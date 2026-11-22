@@ -49,7 +49,7 @@ use crate::song::{
 use crate::theme::{Rgba, Theme, ThemeColors, channel_color};
 use crate::ui::audio_editor::{self, Action, Wave, columns, stretch_of, stretch_ratio, wave_rows};
 use crate::ui::automation::pop_scale;
-use crate::ui::buttons::bubble_button;
+use crate::ui::buttons::action_bubble_button;
 use crate::ui::edit_keys::{self, EditKey};
 use crate::ui::graph_lane::{grow, press_growth};
 use crate::ui::insert::{self, Tap};
@@ -178,9 +178,8 @@ const PULSE: [f32; 3] = [0.15, 0.05, 0.0125];
 /// The handles' pop-in: a ← 0.6·a per frame.
 const HANDLE_RATE: f32 = 0.6;
 /// Floating-menu bubbles have a 0.2 U gap, with room for their pop-in animation.
-pub(crate) const BUTTON_D: f32 = 1.4;
-const ROW_B: f32 = 1.5;
-const ROW_SLOT: f32 = 1.6;
+pub(crate) const BUTTON_D: f32 = 1.5;
+const ROW_SLOT: f32 = 1.75;
 const ROW_M: f32 = 0.2;
 /// Labels shrink until each fits this share of a button's diameter.
 const LABEL_FIT: f32 = 0.85;
@@ -331,8 +330,10 @@ pub struct Clips {
     /// `open` act ([`Self::keys`]); `None` before any: tick 0 on the current track.
     cursor: Option<(f64, (usize, usize))>,
     /// The clip clipboard (`copy`, `cut`): the clips last copied, each with the track it was on (which follows the
-    /// tracks as they move, [`Self::rekey`]) and that track's kind. The song's: a new song starts without it.
-    clipboard: Vec<(ClipRef, LaneKind, Clip)>,
+    /// tracks as they move, [`Self::rekey`]) and that track's kind. Owned by the session, not the project.
+    clipboard: Vec<CopiedClip>,
+    /// Source indices are no longer target identities after a project replacement.
+    clipboard_foreign: bool,
     /// Whether the playlist's scroller has the touch and it left its calm zone (on either axis, 0.5 U each); `None`
     /// when the scroller has no such touch. A touch on empty lane space decides by it. The host sets it each frame.
     pub(crate) left_calm: Option<bool>,
@@ -341,6 +342,16 @@ pub struct Clips {
     /// Issue #64: the clips `Replace sample...` asks about, while it asks (the app keeps it). Each
     /// shows over the question's dim, outlined in `text` ([`message::lift_layer`]); the other clips stay dimmed.
     pub(crate) marked: Vec<ClipRef>,
+}
+
+/// An owned clip snapshot; no reference into the project that supplied it.
+#[derive(Clone, Debug, PartialEq)]
+struct CopiedClip {
+    source: ClipRef,
+    kind: LaneKind,
+    clip: Clip,
+    /// Lane position in the source playlist, including hidden lanes.
+    order: usize,
 }
 
 /// The channels and tracks a playlist `Delete` left with no clip, by index: the app asks whether they go too.
@@ -1011,8 +1022,13 @@ impl Clips {
         self.insert = (self.insert).and_then(|(c, l, tick)| track(c, l).map(|(c, l)| (c, l, tick)));
         self.cursor = (self.cursor).and_then(|(tick, (c, l))| track(c, l).map(|t| (tick, t)));
         // A clip whose track is gone goes from the clipboard.
-        let kept = std::mem::take(&mut self.clipboard).into_iter();
-        self.clipboard = kept.filter_map(|(r, k, c)| Some((map(r)?, k, c))).collect();
+        if !self.clipboard_foreign {
+            let kept = std::mem::take(&mut self.clipboard).into_iter();
+            self.clipboard = kept.filter_map(|mut entry| {
+                entry.source = map(entry.source)?;
+                Some(entry)
+            }).collect();
+        }
     }
 
     /// The view scrolled or zoomed sideways: the insert menu hides. (The floating row hides at any view change by
@@ -1039,6 +1055,16 @@ impl Clips {
             last_tap: self.last_tap,
             cursor: self.cursor,
             clipboard: std::mem::take(&mut self.clipboard),
+            clipboard_foreign: self.clipboard_foreign,
+            ..Self::default()
+        };
+    }
+
+    /// Clear project-local selection/gestures without losing the session clipboard.
+    pub(crate) fn project_replaced(&mut self) {
+        *self = Self {
+            clipboard: std::mem::take(&mut self.clipboard),
+            clipboard_foreign: true,
             ..Self::default()
         };
     }
@@ -1081,7 +1107,7 @@ impl Clips {
             EditKey::Paste => {
                 let show = app.settings.show_hidden_tracks;
                 let pasted =
-                    paste_clips(app.song, &self.clipboard, tick, (channel, lane), snap, show);
+                    paste_clips(app.song, &self.clipboard, self.clipboard_foreign, tick, (channel, lane), snap, show);
                 if !pasted.is_empty() {
                     self.set_selection(pasted);
                     app.song_edited(true);
@@ -1291,7 +1317,7 @@ impl Clips {
             Some(Tap::Button(_)) => {
                 let show = app.settings.show_hidden_tracks;
                 let pasted =
-                    paste_clips(app.song, &self.clipboard, tick, (channel, lane), snap, show);
+                    paste_clips(app.song, &self.clipboard, self.clipboard_foreign, tick, (channel, lane), snap, show);
                 if !pasted.is_empty() {
                     self.set_selection(pasted);
                     app.song_edited(true);
@@ -1582,12 +1608,19 @@ impl Clips {
     }
 
     fn copy_selection(&mut self, song: &Song) {
+        self.clipboard_foreign = false;
+        let order = playlist_lanes(song);
         self.clipboard = self
             .targets()
             .iter()
             .filter_map(|&r| {
                 let kind = song.channels.get(r.channel)?.lanes.get(r.lane)?.kind;
-                Some((r, kind, find(song, r)?.clone()))
+                Some(CopiedClip {
+                    source: r,
+                    kind,
+                    clip: find(song, r)?.clone(),
+                    order: order.iter().position(|&track| track == (r.channel, r.lane))?,
+                })
             })
             .collect();
     }
@@ -1597,7 +1630,10 @@ impl Clips {
         let targets = self.targets();
         let &first = targets.first()?;
         match OPS[i].0 {
-            ClipOp::Copy => self.copy_selection(app.song),
+            ClipOp::Copy => {
+                self.copy_selection(app.song);
+                self.row.dismiss_after_feedback();
+            }
             ClipOp::Duplicate => {
                 let copies = copy_clips(app.song, &targets, snap);
                 self.set_selection(copies);
@@ -3301,34 +3337,64 @@ pub fn copy_clip(lane: &mut Lane, id: u32, grid: f64) -> Option<u32> {
 /// the others keep their offsets from it. A lone clip goes on `track` when that is a track of its kind, else each goes
 /// back on its own track; a track that is gone or of another kind takes nothing, nor does a hidden one (`Hide track`)
 /// unless `show_hidden` (Settings `Show hidden tracks`). Returns the copies (new ids).
-pub fn paste_clips(
+fn playlist_lanes(song: &Song) -> Vec<(usize, usize)> {
+    song.playlist().into_iter().flat_map(|c| {
+        (0..song.channels[c].lanes.len()).map(move |l| (c, l))
+    }).collect()
+}
+
+fn paste_clips(
     song: &mut Song,
-    clips: &[(ClipRef, LaneKind, Clip)],
+    clips: &[CopiedClip],
+    foreign: bool,
     tick: f64,
     (channel, lane): (usize, usize),
     grid: f64,
     show_hidden: bool,
 ) -> Vec<ClipRef> {
-    let Some(first) = clips.iter().map(|c| c.2.start_tick).min() else {
+    let Some(first) = clips.iter().map(|c| c.clip.start_tick).min() else {
         return Vec::new();
     };
     let at = (tick.max(0.0) / grid).round() * grid;
     let kind = |song: &Song, c: usize, l: usize| Some(song.channels.get(c)?.lanes.get(l)?.kind);
     let mut pasted = Vec::new();
-    for (r, k, clip) in clips {
-        let (c, l) = match clips.len() == 1 && kind(song, channel, lane) == Some(*k) {
-            true => (channel, lane),
-            false => (r.channel, r.lane),
+    let tracks = playlist_lanes(song);
+    for entry in clips {
+        let (r, k, clip) = (entry.source, entry.kind, &entry.clip);
+        let destination = if foreign {
+            // Automation targets contain project-local module/pad ids. Without an
+            // unambiguous binding, skipping is safer than driving an unrelated control.
+            if k == LaneKind::Automation {
+                continue;
+            }
+            tracks.iter().enumerate().filter(|(_, (c, l))| {
+                let ch = &song.channels[*c];
+                let lane = &ch.lanes[*l];
+                lane.kind == k && (show_hidden || !lane.hidden) && match k {
+                    LaneKind::Notes => matches!(ch.kind, ChannelKind::Instrument | ChannelKind::Synth(_) | ChannelKind::Rack),
+                    LaneKind::Drums => ch.kind == ChannelKind::Drums,
+                    LaneKind::Audio => true,
+                    LaneKind::Automation => false,
+                }
+            }).min_by_key(|(order, _)| order.abs_diff(entry.order))
+                .map(|(_, &track)| track)
+        } else if clips.len() == 1 && kind(song, channel, lane) == Some(k) {
+            Some((channel, lane))
+        } else {
+            Some((r.channel, r.lane))
         };
-        let fits = |t: &&mut Lane| t.kind == *k && (show_hidden || !t.hidden);
+        let Some((c, l)) = destination else { continue; };
+        let fits = |t: &&mut Lane| t.kind == k && (show_hidden || !t.hidden);
         let Some(target) = lane_mut(song, c, l).filter(fits) else {
             continue;
         };
         let mut copy = clip.clone();
         // `as` saturates at the last tick.
         copy.start_tick = (at + f64::from(clip.start_tick - first)).round() as u32;
-        target.last_clip_id += 1;
-        copy.id = target.last_clip_id;
+        let max_id = target.clips.iter().map(|c| c.id).max().unwrap_or(0).max(target.last_clip_id);
+        let Some(id) = max_id.checked_add(1) else { continue; };
+        target.last_clip_id = id;
+        copy.id = id;
         pasted.push(ClipRef {
             channel: c,
             lane: l,
@@ -3813,23 +3879,49 @@ pub(crate) struct FloatingRow {
     pub(crate) covered: bool,
     /// When the row last showed from hidden (input time): its pop-in.
     shown_at: f64,
+    /// One short release flash, no timer/thread or delayed edit.
+    feedback: Option<(usize, f64)>,
+    dismiss: bool,
 }
 
 impl FloatingRow {
     /// `Select All`: shows the row anchored at the viewport's centre (these editors have no focus cell).
     pub(crate) fn select_all(&mut self) {
+        (self.dismiss, self.feedback) = (false, None);
         self.anchor = self.view.map(|v| v.grid.center());
     }
 
     /// Hides the row until a later gesture re-shows it (the keymap's editing actions, `ui/edit_keys.rs`).
     pub(crate) fn hide(&mut self) {
         self.anchor = None;
+        (self.dismiss, self.feedback) = (false, None);
+    }
+
+    fn dismiss_after_feedback(&mut self) {
+        if self.feedback.is_some() {
+            self.dismiss = true;
+        } else {
+            self.hide();
+        }
+    }
+
+    fn finish_feedback(&mut self, now: f64) -> bool {
+        if self.feedback.is_some_and(|(_, at)| now - at >= 0.09) {
+            self.feedback = None;
+            if self.dismiss {
+                self.hide();
+                self.drawn = None;
+                return true;
+            }
+        }
+        false
     }
 
     /// A box's release that selected something: the row shows, anchored at the release `p`, even where the box caught
     /// a selection with the bounds of the one before (the marquee law; the bounds alone cannot tell).
     pub(crate) fn boxed(&mut self, p: Pos2) {
         (self.anchor, self.press) = (Some(p), None);
+        (self.dismiss, self.feedback) = (false, None);
     }
 
     /// A drag of the selection started: hidden, and its release, which is no tap or long press, shows nothing.
@@ -3884,7 +3976,7 @@ impl FloatingRow {
         }
     }
 
-    /// The row of light bubbles ([`bubble_button`]), one per label, over `sel` in `view` (placed by
+    /// The row of light bubbles ([`action_bubble_button`]), one per label, over `sel` in `view` (placed by
     /// [`place_row`]) while shown; button `i` has the id `(id, i)`. Returns the index and centre of the one clicked.
     pub(crate) fn show(
         &mut self,
@@ -3895,6 +3987,10 @@ impl FloatingRow {
         labels: &[&str],
         cx: &UiCtx,
     ) -> Option<(usize, Pos2)> {
+        let now = ui.input(|i| i.time);
+        if self.finish_feedback(now) {
+            return None;
+        }
         let (press, release) = ui.input(|i| {
             let at = |down: bool| {
                 i.events.iter().find_map(|e| match *e {
@@ -3908,9 +4004,13 @@ impl FloatingRow {
         let press = press.filter(|&p| {
             !self.covered && view.grid.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id())
         });
-        self.track(view, sel.as_ref().map(|s| s.rect), press, release);
+        if !self.dismiss {
+            self.track(view, sel.as_ref().map(|s| s.rect), press, release);
+        }
         let (c, m) = (&cx.theme.colors, cx.m);
-        let size = vec2(m.u(ROW_SLOT) * labels.len() as f32, m.u(ROW_B));
+        // Keep targets at least 44 logical points where possible. Wrap rather
+        // than hide or shrink six actions off the edge of a small phone.
+        let (columns, slot, size) = action_row_layout(view.grid.width(), labels.len(), m.u(ROW_SLOT), m.u(ROW_M));
         let px = 1.0 / m.ppp();
         let was = self.drawn.is_some();
         self.drawn = (self.anchor.zip(sel))
@@ -3918,31 +4018,44 @@ impl FloatingRow {
         let row = self.drawn?;
         // The pop-in: shown from hidden, every circle's radius is scaled by 1.0515·sin(1.885·(1 − a)), a ← 0.6·a per
         // frame (per 60 Hz frame of input time, as the editors' pops), 0 below 0.01. Input never waits for it.
-        let now = ui.input(|i| i.time);
         if !was {
             self.shown_at = now;
         }
         let a = pop_in(ROW_POP, now - self.shown_at);
-        if a > 0.0 {
+        if a > 0.0 || self.feedback.is_some() {
             ui.ctx().request_repaint();
         }
-        let (d, scale) = (m.u(BUTTON_D), row_pop_scale(a));
+        let (d, scale) = (m.u(BUTTON_D).min(slot * 0.86), row_pop_scale(a));
         let font = label_font(ui.ctx(), m, d, labels);
         let mut clicked = None;
         for (i, &label) in labels.iter().enumerate() {
             let center = pos2(
-                row.left() + (i as f32 + 0.5) * m.u(ROW_SLOT),
-                row.center().y,
+                row.left() + ((i % columns) as f32 + 0.5) * slot,
+                row.top() + ((i / columns) as f32 + 0.5) * slot,
             );
             // Light floating-row bubbles, not `background` discs in a `text` ring. The button takes its full disc
             // while it pops in.
             let button = Id::new((id, i));
-            if bubble_button(ui, button, center, d, scale, label, font.clone(), c).clicked() {
+            let flash = self.feedback.is_some_and(|(pressed, _)| pressed == i);
+            if action_bubble_button(ui, button, center, d, slot, scale, flash, label, font.clone(), c).clicked()
+                && !self.dismiss
+            {
+                self.feedback = Some((i, now));
+                ui.ctx().request_repaint();
                 clicked = Some((i, center));
             }
         }
         clicked
     }
+}
+
+/// Columns, target pitch and bounds shared by every floating action.
+fn action_row_layout(width: f32, count: usize, desired: f32, margin: f32) -> (usize, f32, Vec2) {
+    let room = (width - 2.0 * margin).max(1.0);
+    let slot = desired.max(44.0).min(room);
+    let columns = ((room / slot).floor() as usize).max(1).min(count.max(1));
+    let rows = count.div_ceil(columns);
+    (columns, slot, vec2(columns as f32 * slot, rows as f32 * slot))
 }
 
 /// A floating row's pop-in scale at `a` (1 when settled).
@@ -4065,6 +4178,170 @@ mod tests {
             pan: Event::DEFAULT_PAN,
             slide: false,
         }
+    }
+
+    fn copied_source() -> (Song, Clips) {
+        let mut song = Song::default();
+        for kind in [ChannelKind::AudioClip, ChannelKind::Instrument, ChannelKind::Drums] {
+            song.add_channel(kind);
+        }
+        let mut refs = Vec::new();
+        for channel in 1..=3 {
+            let c = song.channels[channel].lanes[0].add_clip(256 + channel as u32 * 128, 4.0);
+            c.offset_beats = 0.5;
+            c.visible_len_beats = 3.0;
+            if channel == 1 {
+                let mut slot = crate::song::SamplerSlot::default();
+                slot.file.path = Some(crate::flm::chunk::ContentPath::Shorthand {
+                    root: crate::flm::chunk::ContentRoot::User,
+                    relative: "My Samples/source.wav".into(),
+                });
+                slot.params[0] = 0.37;
+                c.file.sample = Some(Box::new(slot));
+            } else if channel == 2 {
+                c.events = vec![note(0, 64)];
+            } else {
+                c.events = vec![Event::Drum {
+                    pos: 32, len_beats: 0.25, pad: 2, velocity: 90,
+                    pan: 100, value: 30000, repeat: 2,
+                }];
+            }
+            refs.push(ClipRef { channel, lane: 0, id: c.id });
+        }
+        let mut state = Clips::default();
+        state.set_selection(refs);
+        state.copy_selection(&song);
+        (song, state)
+    }
+
+    #[test]
+    fn cross_project_clipboard_survives_replacement_deselection_and_target_rekeys() {
+        let (_, mut state) = copied_source();
+        let snapshot = state.clipboard.clone();
+        state.project_replaced();
+        assert!(state.clipboard_foreign);
+        assert!(state.targets().is_empty());
+        state.deselect();
+        state.rekey(|_, _| None);
+        state.project_replaced();
+        assert_eq!(state.clipboard, snapshot);
+    }
+
+    #[test]
+    fn cross_project_mixed_clips_match_existing_lanes_not_the_vertical_cursor() {
+        let (_, mut state) = copied_source();
+        state.project_replaced();
+        let mut target = Song::default();
+        for k in [ChannelKind::Drums, ChannelKind::AudioClip, ChannelKind::Instrument, ChannelKind::EffectTrack] {
+            target.add_channel(k);
+        }
+        // Overlap must be allowed and the existing audio must remain byte-for-byte unchanged.
+        let existing = target.channels[2].lanes[0].add_clip(1024, 16.0).clone();
+        let racks: Vec<_> = target.channels.iter().map(|c| c.rack.clone()).collect();
+        let channels = target.channels.len();
+        let pasted = paste_clips(&mut target, &state.clipboard, true, 1024.0, (4, 0), 128.0, false);
+        assert_eq!(pasted.len(), 3);
+        assert_eq!(pasted.iter().map(|r| r.channel).collect::<Vec<_>>(), [2, 3, 1]);
+        assert_eq!(target.channels.len(), channels);
+        assert_eq!(target.channels[2].lanes[0].clips[0], existing);
+        for (entry, r) in state.clipboard.iter().zip(pasted) {
+            let mut expected = entry.clip.clone();
+            expected.id = r.id;
+            expected.start_tick = 1024 + entry.clip.start_tick - state.clipboard[0].clip.start_tick;
+            assert_eq!(find(&target, r), Some(&expected));
+        }
+        assert_eq!(target.channels.iter().map(|c| c.rack.clone()).collect::<Vec<_>>(), racks);
+    }
+
+    #[test]
+    fn cross_project_missing_or_hidden_destinations_make_no_project_edit() {
+        let (_, state) = copied_source();
+        let mut target = Song::default();
+        target.add_channel(ChannelKind::EffectTrack);
+        let before = target.clone();
+        assert!(paste_clips(&mut target, &state.clipboard, true, 0.0, (1, 0), 128.0, false).is_empty());
+        assert_eq!(target, before);
+        target.add_channel(ChannelKind::AudioClip);
+        target.channels[2].lanes[0].hidden = true;
+        let before = target.clone();
+        assert!(paste_clips(&mut target, &state.clipboard, true, 0.0, (2, 0), 128.0, false).is_empty());
+        assert_eq!(target, before);
+        assert_eq!(paste_clips(&mut target, &state.clipboard, true, 0.0, (1, 0), 128.0, true).len(), 1);
+    }
+
+    #[test]
+    fn cross_project_multiple_matches_use_nearest_source_organization_and_repeat_safely() {
+        let (_, mut state) = copied_source();
+        state.clipboard.retain(|entry| entry.kind == LaneKind::Notes);
+        state.clipboard[0].order = 3;
+        let mut target = Song::default();
+        for k in [ChannelKind::Instrument, ChannelKind::AudioClip, ChannelKind::Instrument, ChannelKind::Instrument] {
+            target.add_channel(k);
+        }
+        let order = playlist_lanes(&target);
+        let nearest = order[3];
+        let snapshot = state.clipboard.clone();
+        for _ in 0..2 {
+            let out = paste_clips(&mut target, &state.clipboard, true, 512.0, (1, 0), 128.0, false);
+            assert_eq!((out[0].channel, out[0].lane), nearest);
+        }
+        assert_eq!(state.clipboard, snapshot);
+        let lane = &target.channels[nearest.0].lanes[nearest.1];
+        assert_eq!(lane.clips.len(), 2);
+        assert_ne!(lane.clips[0].id, lane.clips[1].id);
+    }
+
+    #[test]
+    fn cross_project_does_not_rebind_project_local_automation_ids() {
+        let mut song = Song::default();
+        let mut state = Clips::default();
+        let c = song.channels[0].lanes[0].add_clip(0, 4.0);
+        state.selected = Some(ClipRef { channel: 0, lane: 0, id: c.id });
+        state.copy_selection(&song);
+        let before = song.clone();
+        assert!(paste_clips(&mut song, &state.clipboard, true, 0.0, (0, 0), 128.0, false).is_empty());
+        assert_eq!(song, before);
+        assert_eq!(paste_clips(&mut song, &state.clipboard, false, 0.0, (0, 0), 128.0, false).len(), 1);
+    }
+
+    #[test]
+    fn action_targets_are_consistent_non_overlapping_and_wrap_on_small_phones() {
+        for width in [180.0, 240.0, 280.0, 320.0, 360.0, 480.0, 800.0] {
+            let (columns, slot, size) = action_row_layout(width, 6, 56.0, 6.4);
+            assert!(slot >= 44.0);
+            assert!(size.x + 12.8 <= width + 0.01);
+            assert!(size.y >= slot);
+            let rects: Vec<_> = (0..6).map(|i| Rect::from_min_size(
+                pos2((i % columns) as f32 * slot, (i / columns) as f32 * slot), Vec2::splat(slot)
+            )).collect();
+            for i in 0..6 {
+                for j in i+1..6 {
+                    let intersection = rects[i].intersect(rects[j]);
+                    assert!(!intersection.is_positive());
+                }
+            }
+        }
+        assert!(action_row_layout(240.0, 6, 56.0, 6.4).0 < 6);
+        assert_eq!(action_row_layout(800.0, 6, 56.0, 6.4).0, 6);
+    }
+
+    #[test]
+    fn copy_feedback_dismisses_the_row_once_and_reopening_restores_it() {
+        let mut row = FloatingRow::default();
+        row.anchor = Some(pos2(100.0, 100.0));
+        row.drawn = Some(Rect::from_min_size(Pos2::ZERO, vec2(300.0, 56.0)));
+        row.feedback = Some((0, 1.0));
+        row.dismiss_after_feedback();
+        assert!(row.dismiss);
+        assert!(!row.finish_feedback(1.05));
+        assert!(row.showing());
+        assert!(row.finish_feedback(1.1));
+        assert!(!row.showing());
+        assert!(!row.owns_pointer(Some(pos2(100.0, 20.0))));
+        row.boxed(pos2(100.0, 100.0));
+        assert!(row.anchor.is_some());
+        assert!(!row.dismiss);
+        assert!(row.feedback.is_none());
     }
 
     fn key(event: &Event) -> u8 {

@@ -120,6 +120,31 @@ pub fn bubble_button(
     response
 }
 
+/// Floating editor action: a larger, non-overlapping square touch target around
+/// the visible disc. Press feedback is UI-only; the operation never waits for it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn action_bubble_button(
+    ui: &mut egui::Ui,
+    id: Id,
+    center: Pos2,
+    diameter: f32,
+    hit: f32,
+    scale: f32,
+    feedback: bool,
+    label: &str,
+    font: FontId,
+    c: &ThemeColors,
+) -> Response {
+    let rect = Rect::from_center_size(center, Vec2::splat(hit));
+    let response = focus::interact(ui, rect, id, Sense::click_and_drag());
+    let down = feedback || response.is_pointer_button_down_on() || response.clicked();
+    let fill = if down { c.text.to_color32().gamma_multiply(0.82) } else { c.text.to_color32() };
+    let growth = if down { 1.06 } else { 1.0 };
+    ui.painter().circle_filled(center, diameter * scale * growth / 2.0, fill);
+    ui.painter().text(center, Align2::CENTER_CENTER, label, font, c.menu_fill.to_color32());
+    response
+}
+
 /// [`filled_circle_button`], with [`tab_button`]'s pressed look when `tab`, painted at `scale` of its size. Hovered with
 /// the pointer on the disc, the fill is RGB × 1.15 too, never twice.
 fn filled_disc(

@@ -1,0 +1,62 @@
+name: Cross-project clipboard validation
+on:
+  workflow_dispatch:
+  push:
+    branches: ["arena/**"]
+    paths:
+      - '.github/workflows/clipboard-validation.yml'
+      - 'src/ui/clips.rs'
+      - 'src/ui/buttons.rs'
+      - 'src/app/tests/keymap_actions.rs'
+jobs:
+  clipboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Format and expose patch
+        run: |
+          rustfmt --edition 2024 --config skip_children=true src/ui/clips.rs src/ui/buttons.rs src/app.rs src/app/tests/keymap_actions.rs src/ui/main_screen.rs
+          git diff > /tmp/clipboard-format.patch
+          python3 - <<'PY'
+          import pathlib, base64, zlib
+          data=base64.b64encode(zlib.compress(pathlib.Path('/tmp/clipboard-format.patch').read_bytes(),9)).decode()
+          for i in range(0,len(data),4000):
+              print(f'::notice title=format-patch-{i:08}::{data[i:i+4000]}')
+          PY
+      - name: Clipboard and editing regressions
+        run: |
+          result=0
+          cargo test --lib --no-run > /tmp/tests.log 2>&1 || result=$?
+          if [ "$result" -eq 0 ]; then
+            for filter in ui::clips::tests ui::main_screen::tests ui::buttons::tests app::tests::keymap_actions app::tests::rack_wiring ui::piano_roll::tests ui::drum_grid::tests ui::step_seq::tests auto_save; do
+              cargo test --lib "$filter" >> /tmp/tests.log 2>&1 || result=$?
+            done
+          fi
+          python3 - <<'PY'
+          import pathlib
+          lines=pathlib.Path('/tmp/tests.log').read_text().splitlines()
+          summaries=[line for line in lines if line.startswith('test result:')]
+          print('::notice title=Test summaries::'+'; '.join(summaries))
+          parts=[]
+          for i,line in enumerate(lines):
+              if any(x in line for x in ('error[','error:', 'FAILED', 'panicked', 'failures:')):
+                  parts.extend(lines[max(0,i-2):i+15])
+          message='\n'.join(parts)[-50000:]
+          for i in range(0,len(message),3000):
+              print('::error::'+message[i:i+3000].replace('%','%25').replace('\n','%0A').replace('\r','%0D'))
+          PY
+          cat /tmp/tests.log
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clipboard-validation-log
+          path: /tmp/tests.log

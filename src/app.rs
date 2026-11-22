@@ -785,7 +785,7 @@ impl BanaForgeApp {
                 let editor = &mut self.slots.drum_editor;
                 (editor.step.fold, editor.grid.fold) = folds;
                 // The clip selection, the timeline's scroll and the ruler's gesture belong to the old song too.
-                self.main_screen.clips = Default::default();
+                self.main_screen.clips.project_replaced();
                 self.main_screen.cancel_hold();
                 self.main_screen.region = Default::default();
                 self.main_screen.scroll_x = 0.0;

@@ -555,3 +555,24 @@ fn back_closes_the_topmost_message_then_the_menu_under_it() {
     rig.key(Key::BrowserBack, NONE);
     assert_eq!(rig.overlays(), []);
 }
+
+#[test]
+fn playlist_clip_clipboard_survives_actual_project_replacement_and_routes_to_notes() {
+    let mut rig = rig();
+    let id = rig.app.song.channels[1].lanes[0].clips[0].id;
+    rig.app.main_screen.clips.selected = Some(crate::ui::clips::ClipRef { channel: 1, lane: 0, id });
+    rig.key(Key::C, CMD);
+    let source = rig.app.song.channels[1].lanes[0].clips[0].clone();
+    let mut target = Song::default();
+    target.add_channel(crate::song::ChannelKind::AudioClip);
+    target.add_channel(crate::song::ChannelKind::Instrument);
+    rig.app.song = target;
+    rig.app.song_edited(SongEdit::Replaced, 0);
+    rig.frame(vec![]);
+    rig.key(Key::V, CMD);
+    assert!(rig.app.song.channels[1].lanes[0].clips.is_empty());
+    let pasted = &rig.app.song.channels[2].lanes[0].clips;
+    assert_eq!(pasted.len(), 1);
+    assert_eq!(pasted[0].events, source.events);
+    assert_eq!(pasted[0].loop_len_beats, source.loop_len_beats);
+}

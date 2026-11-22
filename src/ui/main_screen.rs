@@ -5196,6 +5196,12 @@ mod tests {
         rig.frame(vec![]);
         assert_eq!(rig.click_id(button(0)).0, None);
         assert_eq!(rig.clips(2).len(), 1);
+        // Copy flashes then dismisses; reopening retains all actions.
+        rig.frame(vec![]);
+        rig.frame(vec![]);
+        assert!(!rig.screen.clips.row.showing());
+        rig.screen.clips.row.select_all();
+        rig.frame(vec![]);
         assert_eq!(rig.click_id(button(1)).0, Some(SongEdit::Final));
         let starts: Vec<_> = rig.clips(2).iter().map(|c| (c.id, c.start_tick)).collect();
         assert_eq!(starts, [(1, 512), (2, 1024)]);
