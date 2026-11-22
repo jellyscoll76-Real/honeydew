@@ -22,14 +22,22 @@ jobs:
       - name: Build attribution harness outside measurements
         run: |
           mkdir -p measurements
-          rustfmt --edition 2024 src/ui/clips/count_profile.rs
-          cargo test --release --lib high_clip_count_profile --no-run > measurements/build.log 2>&1 || { tail -100 measurements/build.log; exit 1; }
+          rustfmt --edition 2024 src/ui/clips/count_profile.rs src/app/tests/count_profile.rs
+          cargo test --release --lib high_clip_count_ --no-run > measurements/build.log 2>&1 || { tail -100 measurements/build.log; exit 1; }
       - name: Measure production helpers and offline engine
         run: |
           lscpu > measurements/host.txt
-          /usr/bin/time -v -o measurements/resources.txt cargo test --release --lib high_clip_count_profile -- --ignored --nocapture --test-threads=1 > measurements/profile.log 2>&1 || { tail -80 measurements/profile.log; exit 1; }
+          /usr/bin/time -v -o measurements/resources.txt cargo test --release --lib high_clip_count_ -- --ignored --nocapture --test-threads=1 > measurements/profile.log 2>&1 || { tail -80 measurements/profile.log; exit 1; }
           python3 tools/analyze-clip-count-profile.py measurements/profile.log measurements
           cat measurements/REPORT.md >> "$GITHUB_STEP_SUMMARY"
+          python3 - <<'PYREAD'
+          import pathlib, json, zlib, base64
+          root=pathlib.Path('measurements')
+          payload={n:(root/n).read_text() for n in ['data.json','host.txt','resources.txt']}
+          packed=base64.b64encode(zlib.compress(json.dumps(payload).encode(),9)).decode()
+          for i in range(0,len(packed),3500):
+              print(f'::notice title=clip-profile-data-{i:08}::{packed[i:i+3500]}')
+          PYREAD
       - uses: actions/upload-artifact@v4
         if: always()
         with:

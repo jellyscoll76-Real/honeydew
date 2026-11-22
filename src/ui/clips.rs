@@ -30,7 +30,7 @@
 
 mod envelopes;
 #[cfg(all(test, target_os = "linux"))]
-mod count_profile;
+pub(crate) mod count_profile;
 
 use banaforge_audio::drums::SPEED;
 use banaforge_audio::sample_edit::speed_ratio;

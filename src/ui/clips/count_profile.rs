@@ -46,8 +46,8 @@ fn rss_kib() -> u64 {
 }
 fn quantile(v: &[f64], q: f64) -> f64 { v[((v.len() - 1) as f64 * q).round() as usize] }
 
-struct Fixture { song: Song, wav: Vec<u8>, logical_hits: usize, kind: &'static str }
-fn fixture(kind: &'static str, hits: usize) -> Fixture {
+pub(crate) struct Fixture { pub(crate) song: Song, pub(crate) wav: Vec<u8>, logical_hits: usize, kind: &'static str }
+pub(crate) fn fixture(kind: &'static str, hits: usize) -> Fixture {
     let mut song = Song::default();
     let channel_kind = match kind {
         "notes" | "notes_long" => ChannelKind::Instrument,

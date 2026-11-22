@@ -3039,6 +3039,8 @@ mod tests {
     use crate::ui::views::{MenuTab, Overlay};
     use eframe::egui::{Pos2, pos2, vec2};
 
+    #[cfg(target_os = "linux")]
+    mod count_profile;
     mod audio_edit;
     mod automation;
     mod automation_editor;
