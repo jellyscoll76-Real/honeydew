@@ -51,12 +51,12 @@ pub(crate) fn fixture(kind: &'static str, hits: usize) -> Fixture {
     let mut song = Song::default();
     let channel_kind = match kind {
         "notes" | "notes_long" => ChannelKind::Instrument,
-        "drums_steps" | "drums_notes" => ChannelKind::Drums,
+        "drums_steps" | "drums_notes" | "drums_steps_long" | "drums_notes_long" => ChannelKind::Drums,
         _ => ChannelKind::AudioClip,
     };
     song.add_channel(channel_kind);
     let lane = &mut song.channels[1].lanes[0];
-    if kind == "drums_notes" { lane.grid = DrumGrid::Notes; }
+    if kind.starts_with("drums_notes") { lane.grid = DrumGrid::Notes; }
     let count = if kind.ends_with("long") { 16 } else { hits };
     let per_clip = hits / count;
     let pcm: Vec<f32> = (0..6000 * per_clip).map(|i| {
@@ -73,7 +73,7 @@ pub(crate) fn fixture(kind: &'static str, hits: usize) -> Fixture {
                     key: 60 + ((i * per_clip + j) % 12) as u8, velocity: 100, pan: 64, slide: false,
                 }).collect();
             }
-            "drums_steps" | "drums_notes" => {
+            "drums_steps" | "drums_notes" | "drums_steps_long" | "drums_notes_long" => {
                 // The 16-long-clip control carries the same ordered drum hits as the dense short-clip case.
                 c.events = (0..per_clip).map(|j| Event::Drum {
                     pos: (j * PPQ as usize / 4) as u32,
@@ -104,7 +104,7 @@ pub(crate) fn fixture(kind: &'static str, hits: usize) -> Fixture {
 fn high_clip_count_profile() {
     assert!(!cfg!(debug_assertions), "profile optimized builds only");
     for hits in [128, 512, 2048, 4096] {
-        for kind in ["audio", "audio_long", "missing", "empty", "notes", "notes_long", "drums_steps", "drums_notes"] {
+        for kind in ["audio", "audio_long", "missing", "empty", "notes", "notes_long", "drums_steps", "drums_steps_long", "drums_notes", "drums_notes_long"] {
             let f = fixture(kind, hits);
             let reads = Cell::new(0usize);
             let reader = |_: &crate::flm::chunk::ContentPath| {

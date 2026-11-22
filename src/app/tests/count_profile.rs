@@ -23,18 +23,25 @@ fn high_clip_count_playlist_interactions() {
                 let lane_id = egui::Id::new(("clip_lane", 1_usize, 0_usize));
                 let lane = rig.ctx.read_response(lane_id).expect("playlist lane drawn").rect;
                 let start = pos2(lane.left() + 5.0, lane.center().y);
+                let original_id = fixture.song.channels[1].lanes[0].clips[0].id;
+                let original_start = fixture.song.channels[1].lanes[0].clips[0].start_tick;
+                let original_len = fixture.song.channels[1].lanes[0].clips[0].visible_ticks();
                 let t = Instant::now();
                 match action {
                     "select_tap" => {
                         rig.press(start);
                         rig.release(start);
                         rig.frame(vec![]);
+                        assert!(rig.app.main_screen.clips.selected.is_some(), "clip tap must select");
                     }
                     "move_drag" => {
                         rig.press(start);
                         rig.drag_to(start + vec2(4.0, 0.0));
                         rig.drag_to(start + vec2(12.0, 0.0));
                         rig.release(start + vec2(12.0, 0.0));
+                        let moved = rig.app.song.channels[1].lanes[0].clips.iter()
+                            .find(|clip| clip.id == original_id).expect("moved clip remains");
+                        assert_ne!(moved.start_tick, original_start, "body drag must move the first clip");
                     }
                     "resize_drag" => {
                         rig.press(start);
@@ -46,6 +53,9 @@ fn high_clip_count_playlist_interactions() {
                         rig.press(from);
                         rig.drag_to(from + vec2(8.0, 0.0));
                         rig.release(from + vec2(8.0, 0.0));
+                        let resized = rig.app.song.channels[1].lanes[0].clips.iter()
+                            .find(|clip| clip.id == original_id).expect("resized clip remains");
+                        assert_ne!(resized.visible_ticks(), original_len, "end-handle drag must resize the clip");
                     }
                     "horizontal_scroll" => {
                         rig.frame(vec![
@@ -56,6 +66,7 @@ fn high_clip_count_playlist_interactions() {
                                 modifiers: Default::default(),
                             },
                         ]);
+                        assert_ne!(rig.app.main_screen.scroll_x, 0.0, "wheel must scroll the playlist");
                     }
                     _ => unreachable!(),
                 }
@@ -77,7 +88,7 @@ fn high_clip_count_playlist_interactions() {
 fn high_clip_count_full_app() {
     assert!(!cfg!(debug_assertions));
     for hits in [128, 512, 2048, 4096] {
-        for kind in ["audio", "audio_long", "missing", "empty", "notes", "notes_long", "drums_steps", "drums_notes"] {
+        for kind in ["audio", "audio_long", "missing", "empty", "notes", "notes_long", "drums_steps", "drums_steps_long", "drums_notes", "drums_notes_long"] {
             for view in ["overview", "close_end"] {
                 for mode in ["idle", "scroll", "all_selected", "all_selected_indexed"] {
                     let fixture = crate::ui::clips::count_profile::fixture(kind, hits);
