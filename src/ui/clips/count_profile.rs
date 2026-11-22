@@ -165,7 +165,7 @@ fn profile_ui(f: &Fixture, cache: &mut SampleCache, files: &ProjectFiles, view: 
     let base = match view { "close_end" => -(total_beats-16.0)*beat_w, "offscreen" => -(total_beats+32.0)*beat_w, _=>0.0 };
     let refs: Vec<_> = lane.clips.iter().map(|c| ClipRef { channel:1,lane:0,id:c.id }).collect();
     let mut totals: Vec<f64> = Vec::new();
-    let mut sums = [0.0_f64; 6];
+    let mut sums = [0.0_f64; 9];
     let mut calls = 0usize;
     let mut bytes = 0usize;
     let mut visible = 0;
@@ -193,6 +193,15 @@ fn profile_ui(f: &Fixture, cache: &mut SampleCache, files: &ProjectFiles, view: 
         for &r in &refs { black_box(find(&f.song,r)); }
         let selected = start.elapsed().as_secs_f64()*1000.0;
         let start = Instant::now();
+        let indexed = live_clip_refs(&f.song);
+        let index_build = start.elapsed().as_secs_f64()*1000.0;
+        let start = Instant::now();
+        for &(r,_) in &blocks { black_box(indexed.contains(&r)); }
+        let indexed_lookup = start.elapsed().as_secs_f64()*1000.0;
+        let start = Instant::now();
+        for &r in &refs { black_box(indexed.contains(&r)); }
+        let indexed_selected = start.elapsed().as_secs_f64()*1000.0;
+        let start = Instant::now();
         for &(_,r) in &blocks { black_box(r.contains(pos2(512.0+(frame%4) as f32,48.0))); }
         let hit = start.elapsed().as_secs_f64()*1000.0;
         let start = Instant::now();
@@ -215,7 +224,7 @@ fn profile_ui(f: &Fixture, cache: &mut SampleCache, files: &ProjectFiles, view: 
             totals.push(total.elapsed().as_secs_f64()*1000.0);
             cpu+=cpu_ms()-cpu_start;
             let a=allocations::end();calls+=a.0;bytes+=a.1;
-            for (s,v) in sums.iter_mut().zip([layout,lookup,selected,hit,paint,tess]) { *s+=v; }
+            for (s,v) in sums.iter_mut().zip([layout,lookup,selected,index_build,indexed_lookup,indexed_selected,hit,paint,tess]) { *s+=v; }
         }
     }
     totals.sort_by(f64::total_cmp);
@@ -223,7 +232,8 @@ fn profile_ui(f: &Fixture, cache: &mut SampleCache, files: &ProjectFiles, view: 
         "clips":n,"view":view,"motion":motion,"repeat":repeat,"frames":24,"visible":visible,
         "p50_ms":quantile(&totals,0.5),"p95_ms":quantile(&totals,0.95),"p99_ms":quantile(&totals,0.99),
         "layout_ms":sums[0]/24.0,"lookup_ms":sums[1]/24.0,"all_selected_lookup_ms":sums[2]/24.0,
-        "hit_rect_scan_ms":sums[3]/24.0,"paint_ms":sums[4]/24.0,"tessellate_ms":sums[5]/24.0,
+        "index_build_ms":sums[3]/24.0,"indexed_lookup_ms":sums[4]/24.0,"all_selected_indexed_ms":sums[5]/24.0,
+        "hit_rect_scan_ms":sums[6]/24.0,"paint_ms":sums[7]/24.0,"tessellate_ms":sums[8]/24.0,
         "alloc_calls_per_frame":calls/24,"requested_alloc_bytes_per_frame":bytes/24,
         "shapes":shapes,"vertices":vertices,"cpu_ms_per_frame":cpu/24.0,"rss_kib":rss_kib(),
         "gpu_fps":null,"hardware_xruns":null,"includes_full_app":false}));

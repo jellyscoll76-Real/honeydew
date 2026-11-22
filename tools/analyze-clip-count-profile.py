@@ -12,7 +12,7 @@ assert rows, 'No measurements found'
 destination.mkdir(parents=True, exist_ok=True)
 (destination / 'data.json').write_text(json.dumps(rows, indent=2) + '\n')
 lines = ['# High clip count: controlled headless attribution', '',
-         'Linux release build; test-only allocation instrumentation. No production optimization applied.',
+         'Linux release build; test-only allocation instrumentation. Production frame-local selection indexing is under test.',
          '**Not Android FPS, GPU timing, full-app input latency or hardware xrun measurements.**',
          'Paint includes production clip lookup, cached asset lookup, egui shape construction and text; tessellation is separate.',
          'Layout and explicit lookup/selection/hit probes are independent diagnostic passes, not additive full-app phases.',
@@ -22,15 +22,15 @@ lines = ['# High clip count: controlled headless attribution', '',
          'Durations/hit counts match within a comparison; notes/drums are UI fixture controls, not acoustic equivalents.',
          'Each UI entry is the median across three runs of 24 warm samples; fixture construction and cold decode are excluded.', '',
          '## UI helpers (milliseconds per diagnostic frame)', '',
-         '| Case | Hits | Clips | View | Motion | Visible | Layout | Lookup | All-selected lookup | Rect hit scan | Paint | Tessellate | Alloc calls | Requested KiB |',
-         '|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
+         '| Case | Hits | Clips | View | Motion | Visible | Layout | Lookup | All-selected lookup | Index build | Indexed lookup | Indexed all-selected | Rect hit scan | Paint | Tessellate | Alloc calls | Requested KiB |',
+         '|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
 groups = collections.defaultdict(list)
 for row in rows:
     if row['phase'] == 'ui_attribution':
         groups[(row['case'], row['hits'], row['view'], row['motion'])].append(row)
 for (case, hits, view, motion), group in groups.items():
     med = lambda key: statistics.median(r[key] for r in group)
-    fields = [med(k) for k in ['layout_ms','lookup_ms','all_selected_lookup_ms','hit_rect_scan_ms','paint_ms','tessellate_ms']]
+    fields = [med(k) for k in ['layout_ms','lookup_ms','all_selected_lookup_ms','index_build_ms','indexed_lookup_ms','all_selected_indexed_ms','hit_rect_scan_ms','paint_ms','tessellate_ms']]
     lines.append(f'| {case} | {hits} | {med("clips"):g} | {view} | {motion} | {med("visible"):g} | ' +
                  ' | '.join(f'{v:.4f}' for v in fields) + f' | {med("alloc_calls_per_frame"):g} | {med("requested_alloc_bytes_per_frame")/1024:.1f} |')
 lines += ['', '## Offline audio CPU (not hardware playback)', '',
@@ -61,6 +61,8 @@ for (case, hits, view, motion), group in groups.items():
         'clips': med('clips'), 'visible': med('visible'),
         'layout_ms': med('layout_ms'), 'lookup_ms': med('lookup_ms'),
         'all_selected_lookup_ms': med('all_selected_lookup_ms'),
+        'index_build_ms': med('index_build_ms'), 'indexed_lookup_ms': med('indexed_lookup_ms'),
+        'all_selected_indexed_ms': med('all_selected_indexed_ms'),
         'hit_rect_scan_ms': med('hit_rect_scan_ms'), 'paint_ms': med('paint_ms'),
         'tessellate_ms': med('tessellate_ms'),
         'alloc_calls_per_frame': med('alloc_calls_per_frame'),

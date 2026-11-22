@@ -35,6 +35,8 @@ pub(crate) mod count_profile;
 use banaforge_audio::drums::SPEED;
 use banaforge_audio::sample_edit::speed_ratio;
 use banaforge_audio::slicer;
+use std::collections::HashSet;
+
 use eframe::egui::{
     self, Align2, Color32, FontId, Id, Mesh, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
     pos2, vec2,
@@ -245,7 +247,7 @@ pub fn zoomed(
 }
 
 /// A clip of the playlist: the channel, the lane in it, and the clip's id in the lane.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ClipRef {
     pub channel: usize,
     pub lane: usize,
@@ -514,8 +516,13 @@ impl Clips {
         // A clip that went away (undo, another song), or whose track no longer shows (`Hide track`), takes its selection
         // and gesture with it.
         let show = app.settings.show_hidden_tracks;
+        // Selection retention used to call the linear `find` once per selected clip. Build this frame's valid-ref set
+        // once instead: selection/group membership is then O(1) per ref rather than O(clips) per ref. It is deliberately
+        // only an identity index; project data and editing semantics remain unchanged.
+        let live_refs = (self.selected.is_some() || !self.group.is_empty())
+            .then(|| live_clip_refs(app.song));
         let kept = |r: ClipRef| {
-            find(app.song, r).is_some()
+            live_refs.as_ref().is_some_and(|refs| refs.contains(&r))
                 && (show || !app.song.channels[r.channel].lanes[r.lane].hidden)
         };
         if self.selected.is_some_and(|r| !kept(r)) {
@@ -2141,6 +2148,23 @@ fn move_clips(song: &mut Song, moves: &[(ClipRef, (usize, usize))]) -> Vec<ClipR
 
 fn lane_mut(song: &mut Song, channel: usize, lane: usize) -> Option<&mut Lane> {
     song.channels.get_mut(channel)?.lanes.get_mut(lane)
+}
+
+/// All live clip identities in a song, built for one frame's selection-retention pass.
+pub(crate) fn live_clip_refs(song: &Song) -> HashSet<ClipRef> {
+    song.channels
+        .iter()
+        .enumerate()
+        .flat_map(|(channel, ch)| {
+            ch.lanes.iter().enumerate().flat_map(move |(lane, lane_data)| {
+                lane_data.clips.iter().map(move |clip| ClipRef {
+                    channel,
+                    lane,
+                    id: clip.id,
+                })
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn find(song: &Song, r: ClipRef) -> Option<&Clip> {
