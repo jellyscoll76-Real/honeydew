@@ -12,7 +12,7 @@ assert rows, 'No measurements found'
 destination.mkdir(parents=True, exist_ok=True)
 (destination / 'data.json').write_text(json.dumps(rows, indent=2) + '\n')
 lines = ['# High clip count: controlled headless attribution', '',
-         'Linux release build; test-only allocation instrumentation. Production frame-local selection indexing is under test.',
+         'Linux release build; test-only allocation instrumentation. Candidate HashSet indexing is measured in the harness only; production remains unchanged.',
          '**Not Android FPS, GPU timing, full-app input latency or hardware xrun measurements.**',
          'Paint includes production clip lookup, cached asset lookup, egui shape construction and text; tessellation is separate.',
          'Layout and explicit lookup/selection/hit probes are independent diagnostic passes, not additive full-app phases.',
@@ -22,7 +22,7 @@ lines = ['# High clip count: controlled headless attribution', '',
          'Durations/hit counts match within a comparison; notes/drums are UI fixture controls, not acoustic equivalents.',
          'Each UI entry is the median across three runs of 24 warm samples; fixture construction and cold decode are excluded.', '',
          '## UI helpers (milliseconds per diagnostic frame)', '',
-         '| Case | Hits | Clips | View | Motion | Visible | Layout | Lookup | All-selected lookup | Index build | Indexed lookup | Indexed all-selected | Rect hit scan | Paint | Tessellate | Alloc calls | Requested KiB |',
+         '| Case | Hits | Clips | View | Motion | Visible | Layout | Lookup | All-selected lookup | Candidate index build | Indexed lookup | Indexed all-selected | Rect hit scan | Paint | Tessellate | Alloc calls | Requested KiB |',
          '|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
 groups = collections.defaultdict(list)
 for row in rows:

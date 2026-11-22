@@ -1,154 +1,76 @@
-# High clip count investigation: controlled profiling results
+# Large-project performance investigation
 
-**Status: profiled, not yet optimized.** No production code was changed by this
-investigation. The harness is test-only (`src/ui/clips/count_profile.rs`,
-`src/app/tests/count_profile.rs`) and runs in CI via
-`.github/workflows/clip-count-profile.yml` (runs 45065032259, 45066092379).
+**Investigation status: controlled desktop/CI profiling completed; interaction/device coverage is partial. No production optimization was made.** This is a UI/performance investigation only; it does not change audio behavior. Dataset from CI release profile run 45066092379 (commit d03b42e), decoded to `.cache/clip-count-profile/summary.json` and `resources.txt`. A test-only comparison of a candidate hash index is being added; it is not wired into production.
 
-## What was measured
+## Harness, controls and limits
 
-Controlled fixtures with equal musical content: many short clips vs 16 long
-clips carrying the same synthesized pulse sequence (6000 PCM frames per pulse
-at 48 kHz), at 128 / 512 / 2048 / 4096 logical hits, for audio, missing-file,
-empty, Piano Roll notes, and drum (steps/notes) cases. Two views (overview =
-all clips visible; close_end = 65 visible, rest offscreen), idle/scroll, and
-all-selected modes. Three measurement layers:
+- 128 / 512 / 2048 / 4096 logical hits. Short-clip fixture uses one clip per hit; long fixture carries the same periodic pulse sequence in 16 longer clips. Audio content is repeated samples of the same 48 kHz synthetic pulse sequence, so it compares short vs long clip organization while holding total musical content approximately constant.
+- UI fixtures: audio, missing audio, empty clips, Piano Roll notes, drums step and drums note cases. Notes short/long contain the same number of notes; drum fixtures use one hit per short pattern, but the 16-pattern long control does **not** hold drum-hit count constant. Drum conclusions are therefore limited to per-clip UI scaling, not an equivalent rhythmic-sequence A/B.
+- Two view scales (overview spans the arrangement; close-end keeps about 65 of 4096 clips visible), idle and simulated scroll-axis movement, plus a worst-case all-selected mode. UI helpers measure layout, per-visible ID lookup, selection identity retention, a rectangle `contains` scan, paint, tessellation and allocation requests.
+- Full-app control runs complete headless app frames at both view scales, with fake audio sink and an injected moving pointer. Scroll changes the playlist axis. The all-selected mode sets the selection, but is not a gesture sequence. The hit-test measurement is a small rectangle probe, not a tap/marquee benchmark.
+- Offline engine renders 400 blocks × 256 stereo frames at 48 kHz without a device. This is independent of editor visibility and has no real-time audio callback, concurrent UI, Android scheduler, or hardware xrun measurement.
+- No actual move/resize/edit gesture benchmark, touch-device latency, GPU rasterization/frame pacing, long playback session, or phone memory/underrun test was performed. These remain open before a device-level performance claim.
 
-1. **UI attribution** — production helpers (layout, ID lookup, selection
-   retention, hit scan, paint, tessellation) plus allocation counting.
-2. **Full-app headless frames** — complete `BanaForgeApp` frames through the
-   test Rig (fake audio sink, no GPU).
-3. **Offline audio engine** — 400 blocks × 256 stereo frames at 48 kHz.
+## Findings and measurements
 
-**Limits:** Linux CI CPU only. No Android device, no GPU rasterization, no
-real playback, no hardware underruns. Full-app numbers are CPU time per frame,
-not FPS. Move/edit gestures were not measured. Notes/drums are UI fixture
-controls, not acoustic equivalents. Allocation counts include diagnostic
-probes. The composite in the harness is not a real frame; the full-app table
-is the closest to one.
+### Primary performance scaling: visible short clips and repeated linear lookup
 
-## Results
+The clearest controlled result is **clips versus content**. With all clips visible, headless full-app UI p50 grows from roughly 0.2 ms at 128 short clips to 0.3–0.6 ms at 512, about 2.2–2.8 ms at 2048 and about 7.5–8.7 ms at 4096 for empty, missing, notes and drums fixtures. Audio has a second waveform-cache cost (below). With 4096 total clips but only ~65 visible at close-end zoom, idle full-app UI p50 is just 0.40–0.72 ms. 16 long audio clips carrying the equivalent pulse content cost ~0.08 ms at 4096 logical hits; 16 long note patterns cost ~0.40 ms (more notes still need rendering). That supports the observation that a large number of individual clips/patterns is expensive; visibility culling helps substantially.
 
-### Full-app CPU per frame (ms, p50 UI / p95 UI / p50 tessellation)
+Full-app frame timings (UI p50 / UI p95 / tessellation p50, milliseconds; Linux release/headless, no GPU):
 
-| Case | Hits (clips) | Overview idle | Overview all-selected | Close-end idle |
-|---|---:|---:|---:|---:|
-| audio | 512 (512) | 4.92 / 5.00 / 0.63 | 5.85 / 5.95 / 0.65 | 0.34 / 0.38 / 0.28 |
-| audio | 2048 (2048) | 3.22 / 3.56 / 2.17 | 6.62 / 6.96 / 2.24 | 0.45 / 0.50 / 0.28 |
-| audio | 4096 (4096) | 10.01 / 10.24 / 3.73 | 22.78 / 23.32 / 3.86 | 0.64 / 0.71 / 0.28 |
-| missing | 4096 (4096) | 10.83 / 10.98 / 3.78 | 23.54 / 23.80 / 3.79 | 0.63 / 0.70 / 0.26 |
-| empty | 4096 (4096) | 9.33 / 9.56 / 3.74 | 21.75 / 21.91 / 3.79 | 0.58 / 0.64 / 0.27 |
-| notes | 4096 (4096) | 9.46 / 9.55 / 3.80 | 21.29 / 21.42 / 3.76 | 0.57 / 0.68 / 0.29 |
-| drums_steps | 4096 (4096) | 9.14 / 9.32 / 3.50 | 21.67 / 21.88 / 3.79 | 0.58 / 0.67 / 0.28 |
-| audio_long | 4096 (16) | 0.15 / 0.20 / 0.18 | 0.15 / 0.19 / 0.19 | 0.10 / 0.15 / 0.16 |
-| notes_long | 4096 (16) | 0.60 / 0.66 / 0.94 | 0.62 / 0.70 / 0.94 | 0.11 / 0.14 / 0.17 |
-
-At 2048 clips every many-clip case is ~3 ms; at 4096, ~9–11 ms UI plus
-~3.7 ms tessellation. **Clip count, not content type, drives frame time:**
-audio, missing, empty, notes, and drums are nearly identical at 4096.
-16 long clips with the same musical content stay flat at ~0.15 ms.
-Offscreen clips are already cheap (close-end stays under 0.7 ms at 4096
-total clips) — paint culling works. All-selected roughly doubles the cost
-and grows superlinearly (22.8 ms at 4096).
-
-### UI attribution, overview/idle (ms per diagnostic frame, medians)
-
-| Case | Hits | Layout | Lookup | All-sel lookup | Paint | Tess | Alloc calls | Requested |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| audio | 512 | 0.004 | 0.078 | 0.078 | 3.784 | 0.327 | 6,692 | 1.2 MB |
-| audio | 2048 | 0.011 | 1.182 | 1.174 | 1.717 | 0.970 | 10,279 | 3.5 MB |
-| audio | 4096 | 0.043 | 5.043 | 5.033 | 5.781 | 2.136 | 20,521 | 6.9 MB |
-| missing | 4096 | 0.045 | 5.072 | 5.086 | 6.789 | 2.283 | 36,905 | 7.9 MB |
-| empty | 4096 | 0.048 | 5.115 | 5.107 | 5.756 | 2.318 | 16,425 | 6.9 MB |
-| notes | 4096 | 0.052 | 5.025 | 5.018 | 5.702 | 2.345 | 16,425 | 6.9 MB |
-| audio_long | 4096 | 0.001 | 0.000 | 0.000 | 0.035 | 0.025 | 697 | 0.2 MB |
-
-- **ID lookup is quadratic** (visible × total): 0.004 → 0.078 → 1.17 → 5.0 ms
-  as clips go 128 → 512 → 2048 → 4096. `find()` is a linear scan
-  (`src/ui/clips.rs:2146`), and selection retention calls it per selected
-  clip every frame (`group.retain(|&r| kept(r))`, `src/ui/clips.rs:521`).
-  Clip IDs are unique within a lane, so an index is semantically safe.
-- **Paint is the largest single cost at high counts** (~5.7–6.8 ms at 4096,
-  nearly identical across content types — per-clip fixed work, not
-  waveform-specific). Audio at 512 is an outlier (3.78 ms vs ~0.25 ms for
-  other cases): the waveform mesh cache (256 entries / 4 MiB, linear search,
-  `stereo_wave_mesh`) thrashes once distinct geometries exceed 256, forcing
-  a rebuild per clip per frame. Audio paint then *dips* at 2048 (1.72 ms) —
-  clips are narrower at that overview zoom, so meshes have fewer columns.
-  The 512-vs-2048 non-monotonicity is reproducible across two runs but the
-  exact zoom/LOD mechanism is not yet isolated.
-- **Layout is negligible** (0.05 ms at 4096) and **hit-rect scan is
-  negligible** in the probe. Offscreen paint culling already works
-  (close-end paint is flat ~0.1–0.6 ms regardless of total count).
-- **Allocations scale with visible clips**: 16–37k calls and 7–8 MB
-  requested per frame at 4096 visible. Secondary, but real allocator
-  pressure on a phone.
-
-### Offline audio engine (per 256-frame block, ms)
-
-| Case | Hits | p50 | p95 | p99 | Over 5.33 ms budget |
+| Fixture | 512 short clips, overview idle | 2048 short clips, overview idle | 4096 short clips, overview idle | 4096 all selected | 4096 close-end idle |
 |---|---:|---:|---:|---:|---:|
-| audio | 512 | 0.030 | 0.038 | 0.058 | 0 |
-| audio | 2048 | 0.115 | 0.128 | 0.232 | 0 |
-| audio | 4096 | 0.235 | 0.261 | 0.480 | 0 |
-| missing | 4096 | 0.083 | 0.108 | 0.168 | 0 |
-| empty | 4096 | 0.0007 | 0.0007 | 0.0007 | 0 |
-| audio_long | 4096 | 0.003 | 0.003 | 0.004 | 0 |
+| Audio (waveform) | 4.25 / 4.34 / 0.43 | 2.77 / 2.94 / 1.95 | 8.51 / 8.79 / 2.34 | 18.77 / 19.09 / 2.68 | 0.72 / 0.82 / 0.26 |
+| Missing audio | 0.45 / 0.54 / 0.24 | 2.80 / 2.93 / 1.93 | 8.72 / 8.88 / 2.37 | 18.98 / 19.44 / 2.55 | 0.44 / 0.56 / 0.17 |
+| Empty clips | 0.33 / 0.42 / 0.24 | 2.23 / 2.39 / 1.90 | 7.48 / 7.67 / 2.46 | 17.27 / 17.69 / 2.58 | 0.41 / 0.51 / 0.17 |
+| Piano Roll notes | 0.42 / 0.51 / 0.32 | 2.33 / 2.44 / 1.95 | 7.67 / 7.83 / 2.63 | 17.45 / 17.70 / 2.42 | 0.42 / 0.52 / 0.18 |
+| Drum steps | 0.42 / 0.51 / 0.32 | 2.23 / 2.29 / 1.98 | 7.71 / 7.91 / 2.51 | 17.25 / 17.64 / 2.41 | 0.40 / 0.48 / 0.18 |
+| Audio long, 16 clips | 0.08 / 0.14 / 0.12 | 0.08 / 0.16 / 0.11 | 0.08 / 0.17 / 0.11 | 0.08 / 0.18 / 0.11 | 0.05 / 0.15 / 0.11 |
+| Notes long, 16 patterns | 0.12 / 0.19 / 0.09 | 0.24 / 0.33 / 0.29 | 0.40 / 0.52 / 0.67 | 0.40 / 0.50 / 0.67 | 0.11 / 0.15 / 0.17 |
 
-Per-block cost scales with clip slots (missing clips cost engine scan time
-too; empty clips are nearly free). No synthetic budget misses on this CPU,
-but 4096-clip p99 (0.48 ms) leaves less headroom once a phone CPU's
-multiplier is applied. Engine prepare time also grows (14.7 ms at 4096
-audio clips). Secondary contributor, not the main lag source.
+The 512-clip audio row is non-monotonic: it is a waveform-mesh-cache miss/thrash regime, not evidence 2048 clips are intrinsically cheaper. Different fixture construction/zoom/LOD changes the apparent point cost. Broadly, both visible clip count and clip-content complexity affect time; short notes cost more than empty clip records.
 
-### Cold asset loading
+**Repeated linear lookup is a confirmed algorithmic hot spot in the isolated production-helper profile.** `find(song, ClipRef)` scans a lane's clip vector (`src/ui/clips.rs` near `find`); the visible clip pass resolves each visible ref and selection retention calls `find` for each selected/group ref each frame. With every clip visible/selected in the one-lane fixture, the diagnostic lookup and selection probes are each about 0.004 ms (128), 0.078 ms (512), 1.16–1.18 ms (2048), 5.02–5.15 ms (4096). This is consistent with O(N²) total comparisons (N linear searches of N clips). It is significant but is **not the whole frame cost**: paint and tessellation remain material.
 
-Reader calls stay at **1 regardless of clip count** (path dedup works).
-Cold load: audio 4096 = 1.66 ms, missing 4096 = 1.78 ms, drums ≈ 8.7 ms
-flat (one-time kit decode), empty/notes ≈ 0.01 ms. **Asset loading is not
-the problem.**
+At 4096 visible clips, isolated helper medians are ~0.05 ms layout, ~5.0 ms lookup, ~5.0 ms all-selected retention probe, ~5.7–6.8 ms paint, and ~2.1–2.4 ms tessellation (depends on fixture). The full-app all-selected case grows from ~7.5–8.7 ms idle to ~17.3–19.0 ms p50, supporting selection-retention overhead. The layout pass itself is small; offscreen paint culling is effective; hit `Rect::contains` scanning was negligible in its synthetic probe. **Hit-test performance in actual pointer/touch selection remains unmeasured.**
 
-## Responsible subsystems (ranked)
+### Waveforms and allocations
 
-1. **Repeated linear clip-ID lookup** — quadratic for visible-clip
-   resolution and selection retention. Worst multiplier: all-selected at
-   4096 costs 22.8 ms vs 10.0 ms idle in full-app frames.
-2. **Per-visible-clip paint** — shape construction, mesh-cache lookup/rebuild,
-   and text per clip; ~5.7–6.8 ms at 4096 visible. Waveform mesh cache
-   thrash adds a mid-count audio spike (512 clips).
-3. **Tessellation** — ~2.2–2.4 ms at 4096 visible; proportional to shapes.
-4. **Allocations** — 16–37k calls / 7–8 MB per frame at 4096 visible.
-5. **Audio engine slot scan** — per-block cost scales with clip count;
-   secondary on desktop, unknown phone multiplier.
-6. **Not responsible:** layout scan (0.05 ms at 4096), offscreen paint
-   (already culled), asset loading (deduped, one read), hit-rect scan
-   (negligible in probe).
+At 512 visible audio clips, isolated audio paint is 3.78 ms, versus ~0.18–0.27 ms for empty/missing/notes. Source inspection found `stereo_wave_mesh` using linear search in an LRU capped at 256 entries / 4 MiB. Distinct geometries beyond that limit can repeatedly evict/rebuild. This is strong evidence for cache churn causing the 512-clip audio spike. The exact zoom/mesh LOD interaction causing the subsequent 2048 dip is not isolated. Cache bytes are explicitly bounded, so cache growth has memory consequences.
 
-## Safe optimization directions (no behavior change proposed yet)
+At 4096 visible clips, the instrumentation requested ~6.9 MB of allocations per diagnostic audio frame, ~7.9 MB for missing audio and ~6.9 MB for empty/notes, across ~16k–37k allocation/reallocation calls. These are **requested allocation bytes, not live/retained bytes**. Whole profile run peak RSS was 102,888 KiB and process CPU 67.17 seconds, but RSS is process-wide and cannot be assigned to a fixture or candidate renderer. It is not phone memory usage.
 
-1. **Index clip lookup per frame** (HashMap from clip ID to index per lane,
-   built once per frame; IDs are unique within a lane). Turns selection
-   retention and visible-clip resolution from O(S×N)/O(V×N) to O(N) build +
-   O(1) lookups. No editing semantics change.
-2. **Waveform mesh cache**: replace the linear VecDeque search with a hash
-   map keyed by geometry, and/or raise the entry bound with the same byte
-   budget. Addresses the 512-clip audio paint spike. Memory bound must stay
-   explicit.
-3. **Paint LOD**: skip waveform detail (and clip-name text) for sub-pixel
-   clips. Verify current behavior first — the 2048 dip suggests partial
-   LOD already exists.
-4. **Engine slot scan**: faster inactive-slot skipping. Higher risk; needs
-   audio regression tests. Lower priority.
-5. **Do not** merge clips, change editing behavior, or touch audio quality,
-   latency, MIDI timing, or instrument responsiveness.
+### UI versus offline audio engine
 
-## What remains before claiming a fix
+The CPU profile separates the UI from the synthetic engine render. At 4096 clips, 400 rendered blocks (each 256 stereo frames, 48 kHz) measured:
 
-- Implement (1) and (2), re-run this harness, and confirm the quadratic
-  lookup term and the 512-clip paint spike are gone.
-- Add move/edit gesture measurement and a zoom sweep to isolate the
-  512-vs-2048 paint non-monotonicity.
-- Real playback testing on device (the user is phone-only) with hardware
-  underrun observation; desktop CPU numbers do not transfer directly.
-- Large-arrangement regression tests in CI so clip counts cannot silently
-  regress.
+| Engine fixture | Prepare time | Block p50 | Block p95 | Block p99 | Blocks > 5.33 ms |
+|---|---:|---:|---:|---:|---:|
+| Audio clips | 14.712 ms | 0.235 ms | 0.261 ms | 0.480 ms | 0 |
+| Missing audio | 16.800 ms | 0.083 ms | 0.108 ms | 0.168 ms | 0 |
+| Empty clips | 1.073 ms | 0.0007 ms | 0.0007 ms | 0.0007 ms | 0 |
+| Audio long, 16 clips | 0.086 ms | 0.0032 ms | 0.0034 ms | 0.0038 ms | 0 |
+
+Engine slot preparation and per-block scanning scale with clip slots; on this desktop test they are far below the 5.33 ms block budget. This is **not** evidence of phone headroom or absence of device underruns. It does show the measured high-count lag is predominantly UI/frame work, not a synthetic render missing its budget. Do not disable audio instruments/effects when editors are inactive; audio-engine processing is independent of the visible view.
+
+Cold file reads are path-deduplicated to one reader call per audio/missing fixture, irrespective of clip count. Cold audio at 4096 took ~1.7 ms; drum kit cold time ~8.6 ms was a one-off fixture load. Asset loading does not explain steady per-frame lag.
+
+## Proposed directions compared (not implemented)
+
+1. **Build an identity index for clip refs** (candidate hash/set or per-lane ID-to-index map). Likely attacks O(N²) ref resolution and selection retention while preserving clip records and edit semantics. A hash structure adds build/allocation cost and memory: rough order for 4096 refs is 0.1–0.3 MiB depending on table capacity/layout; a full-song index over many lanes costs more. Benchmark candidate build + lookup against linear path first; consider only building when there is a non-empty selection. A dense per-lane ID array may use less memory if IDs are bounded/dense, but IDs can be replaced/renumbered on cross-lane moves, so invalidation/lifetime must be correct. A test-only candidate timing is being added; production remains unchanged.
+2. **Waveform mesh caching**: profile LRU key lookup and hit rate; a hash map can reduce linear cache search, while retaining a strict byte/entry cap. Raising the cap could reduce rebuilds but increases retained memory; never assume larger is better. Cache only immutable waveform geometry and keep overlays (selection, playhead, handles) live.
+3. **Visible-content work**: visibility culling already prevents most offscreen paint, but current layout and interaction enumeration still scan lane clips. Interval/bucket indexing might reduce work for large sparse lanes, at cost of index maintenance on move/resize/undo/import. Actual pointer hit-testing and edit gesture benchmarks are needed before this direction.
+4. **Cached visuals / tiles (user proposal)**: feasible as a display-only layer while project clips/notes remain authoritative and individually editable. Use bounded, zoom/DPI/theme/sample-version keyed tiles; draw selected/hovered clips, handles, playhead and drag previews as live overlay; retain geometry/ref-to-project mapping for hit tests and normal clip-level editing. Invalidation must cover move/resize/delete, waveform/sample updates, lane height/order, zoom, ppp, color/theme and text. A single 1024×256 RGBA tile is 1 MiB at 1× and 4 MiB at 2×; dozens of retained tiles quickly consume 10s–100s of MiB. Use a small LRU or vector/mesh cache rather than caching the whole song. Raster zoom can blur; vector tiles preserve quality but cost more tessellation/memory. This is a broader prototype, not the first fix.
+5. **On-demand inactive editors**: current app frame code draws the current playlist/mixer and calls `slots.view` for the active bottom editor; it does not draw every editor view every frame. UI state/resources can remain retained without rendering. More lazy construction or releasing editor-only caches may trim memory but is unlikely to address the measured playlist hot path and risks losing scroll/selection state or causing reload hitches. Audio instruments/effects must remain active regardless of editor visibility.
+6. **Audio engine inactive-slot optimization** is lower priority: small desktop cost, behavior-sensitive. Any change needs offline equivalence tests and device underrun/timing tests; it is not justified before UI work is measured.
+
+## Recommended order / open measurements
+
+1. Keep production unchanged while the test-only candidate identity index is measured at all hit counts and all-selected cases. Compare build + lookup total, allocation and full-app frames; if benefit is small, drop it.
+2. Instrument waveform-cache hit/miss/eviction/rebuild and test hash lookup under the same 128–4096/zoom workload. Preserve the 4 MiB bound for the first prototype and compare image/shape equality.
+3. Add genuine tap/select/marquee/move/resize performance actions, plus denser drum patterns with equivalent event content. Measure scrolling independently from pointer movement and zoom at multiple fixed viewport sizes.
+4. Only then prototype bounded visual tiles if paint/tessellation remains the dominant cost. Keep project/edit/audio data fully independent.
+5. Run exact Android device tests with screen/frame timing, memory pressure and audio underrun observation during playback + scrolling/editing. None of the desktop CPU results establish this.
+
+No APK was built or distributed. The repo's `android/RELEASE_HOLD.md` remains in force.

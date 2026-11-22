@@ -1,6 +1,6 @@
 # DWP playback pitch investigation
 
-**Status: code-path audit complete; reported FL Studio Mobile discrepancy is not yet reproduced. No pitch fix made.** The four referenced recordings and the corresponding DWP/sample source files are not present in this checkout, so a controlled cross-application comparison and the requested multi-instrument validation cannot be performed yet.
+**Status: the supplied recording comparison reproduces an approximately one-octave output difference; the cause is not yet localized. No pitch fix made.** The Drive ZIP supplied the four recordings, but did not include the corresponding DWP programs, source samples or project/MIDI files. The output-pitch difference is measured below; the requested controlled same-source, multi-instrument validation is therefore still outstanding.
 
 ## Findings from source
 
@@ -20,14 +20,27 @@ The current code may still differ from FL Studio Mobile because the DWP field in
 
 ### Existing tests and their limits
 
-`crates/audio/tests/dw_sampler.rs::pitch_follows_the_step_law` uses synthetic 44.1 kHz sine samples and checks native/root pitch, semitone pitch, a zone change and Pitch/Fine behavior at a 48 kHz output rate. Other DW sampler tests cover zone selection, velocity, loops/envelopes and rendering. `crates/audio/tests/dwp.rs` tests parser fields and sample decoding. These establish internal behavior against the test fixture's assumed DWP layout; they do **not** validate real factory DWP metadata or match FL Studio Mobile's rendering. No actual DWP presets, WAV/MP3 comparison files or attached recordings were available in the working tree.
+`crates/audio/tests/dw_sampler.rs::pitch_follows_the_step_law` uses synthetic 44.1 kHz sine samples and checks native/root pitch, semitone pitch, a zone change and Pitch/Fine behavior at a 48 kHz output rate. Other DW sampler tests cover zone selection, velocity, loops/envelopes and rendering. `crates/audio/tests/dwp.rs` tests parser fields and sample decoding. These establish internal behavior against the test fixture's assumed DWP layout; they do **not** validate real factory DWP metadata or match FL Studio Mobile's rendering.
+
+## Supplied recording analysis
+
+The Drive ZIP contains four recordings, not raw DWP samples: Bana Forge outputs are 48 kHz stereo PCM WAV; FL Studio Mobile outputs are 44.1 kHz stereo MP3. I decoded the files and measured Hann-windowed 0.4-second FFT peaks in sustained sections. Results (strongest spectral peak in 100–600 Hz):
+
+| Pair | FL Studio Mobile peak | Bana Forge peak | Ratio |
+|---|---:|---:|---:|
+| Default, 3.50–3.90 s | 130.74 Hz | 260.74 Hz | 1.994× |
+| Default, 4.00–4.40 s | 130.53 Hz | 260.97 Hz | 2.000× |
+| Trance Delay, 3.50–3.90 s | 130.74 Hz | 260.74 Hz | 1.994× |
+| Trance Delay, 4.00–4.40 s | 130.53 Hz | 260.97 Hz | 2.000× |
+
+The same near-exact 2× difference in both pairs confirms that the supplied outputs sound about one octave apart in these sustained sections. The effect setting does not materially change the pitch discrepancy. It is **not proof of a sampler pitch bug**: recordings alone cannot establish identical MIDI note numbers, source preset/sample-zone, tuning, velocity, sample rate, note timing or app settings; MP3 and WAV can have different latency/length. Default recording duration is 4.546 s (FLM MP3) vs 4.626 s (Bana Forge WAV); the delay pair is 6.610 s vs 6.689 s.
 
 ## What is not established
 
-- Whether either recording pair contains the same exact source instrument/program, zone, MIDI key number, velocity, note length, pitch/fine settings and sample rate.
-- Whether the approximately 130 Hz vs 261 Hz representative sections are fundamental frequencies of equivalent notes/sections, rather than a different octave/zone/attack or harmonic selection.
-- Whether the issue is DWP root parsing, source preset metadata, note/octave selection, sample-rate metadata, or an audio-engine regression.
-- Whether WAV/MP3 playback is unchanged on device. The code has distinct regular audio-clip and DW-sampler paths, but no supplied controlled test sources or device playback were available here.
+- Whether the two apps rendered the exact same source instrument/program and sample zone at identical MIDI note number, velocity, note length, pitch/fine/bend settings and output sample rate.
+- Whether the approximately 130 Hz vs 261 Hz peaks correspond to the same fundamental and musical section rather than a different octave/zone/attack/harmonic selection in the test setup. The stable near-2× ratio makes an octave discrepancy in the supplied output likely, but does not identify its cause.
+- Whether the issue is DWP root parsing, source preset metadata, note-number mapping, sample-rate metadata, or an audio-engine regression.
+- Whether ordinary WAV/MP3 playback is unchanged on device. The code has distinct regular audio-clip and DW-sampler paths, but these recordings are not raw controlled test assets and no device playback validation was performed.
 
 ## Next evidence required before an audio change
 

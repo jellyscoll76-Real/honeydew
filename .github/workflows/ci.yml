@@ -50,15 +50,10 @@ jobs:
                   message = text[pos:pos+800].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
                   print(f"::error file={file},line={start},title=rustfmt diff::{message}")
           for line in lines:
-              match = re.match(r"Diff in (.+):(\d+):", line)
+              match = re.match(r"Diff in .*/banaforge/(.+):(\d+):", line)
               if match:
                   emit()
-                  diff_path = pathlib.Path(match.group(1))
-                  try:
-                      file = str(diff_path.relative_to(pathlib.Path.cwd()))
-                  except ValueError:
-                      file = str(diff_path)
-                  start = int(match.group(2))
+                  file, start = match.group(1), int(match.group(2))
                   chunk = [line]
               elif chunk:
                   chunk.append(line)

@@ -1,7 +1,7 @@
 //! Test-only attribution harness. Runs production helpers, not a GPU/device benchmark.
 use super::*;
 use banaforge_audio::device::AudioRenderer;
-use std::{cell::Cell, hint::black_box, time::Instant};
+use std::{cell::Cell, collections::HashSet, hint::black_box, time::Instant};
 
 #[cfg(target_os = "linux")]
 mod allocations {
@@ -193,13 +193,14 @@ fn profile_ui(f: &Fixture, cache: &mut SampleCache, files: &ProjectFiles, view: 
         for &r in &refs { black_box(find(&f.song,r)); }
         let selected = start.elapsed().as_secs_f64()*1000.0;
         let start = Instant::now();
-        let indexed = live_clip_refs(&f.song);
+        // Candidate only: a test-local hash index compared against production linear find; production is untouched.
+        let indexed: HashSet<_> = lane.clips.iter().map(|clip| (1usize, 0usize, clip.id)).collect();
         let index_build = start.elapsed().as_secs_f64()*1000.0;
         let start = Instant::now();
-        for &(r,_) in &blocks { black_box(indexed.contains(&r)); }
+        for &(r,_) in &blocks { black_box(indexed.contains(&(r.channel, r.lane, r.id))); }
         let indexed_lookup = start.elapsed().as_secs_f64()*1000.0;
         let start = Instant::now();
-        for &r in &refs { black_box(indexed.contains(&r)); }
+        for &r in &refs { black_box(indexed.contains(&(r.channel, r.lane, r.id))); }
         let indexed_selected = start.elapsed().as_secs_f64()*1000.0;
         let start = Instant::now();
         for &(_,r) in &blocks { black_box(r.contains(pos2(512.0+(frame%4) as f32,48.0))); }
