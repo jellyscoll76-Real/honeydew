@@ -1,7 +1,7 @@
 //! Test-only attribution harness. Runs production helpers, not a GPU/device benchmark.
 use super::*;
 use banaforge_audio::device::AudioRenderer;
-use std::{cell::Cell, collections::HashSet, hint::black_box, time::Instant};
+use std::{cell::Cell, collections::{HashMap, HashSet}, hint::black_box, time::Instant};
 
 #[cfg(target_os = "linux")]
 mod allocations {
@@ -160,8 +160,108 @@ fn high_clip_count_profile() {
     }
 }
 
+#[test]
+#[ignore = "test-only ID index build and mutation maintenance costs; Linux/release"]
+fn high_clip_count_index_maintenance() {
+    assert!(!cfg!(debug_assertions));
+    let fixture = fixture("empty", 4096);
+    let mut build_ms = Vec::new();
+    let mut add_ms = Vec::new();
+    let mut copy_ms = Vec::new();
+    let mut delete_ms = Vec::new();
+    let mut same_lane_move_ms = Vec::new();
+    let mut cross_lane_move_ms = Vec::new();
+    let mut load_index_ms = Vec::new();
+    for _ in 0..9 {
+        let lane = &fixture.song.channels[1].lanes[0];
+        let start = Instant::now();
+        let index: HashMap<u32, usize> = lane.clips.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+        build_ms.push(start.elapsed().as_secs_f64()*1000.0);
+        black_box(index);
+
+        let mut lane = fixture.song.channels[1].lanes[0].clone();
+        let mut index: HashMap<u32, usize> = lane.clips.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+        let start = Instant::now();
+        let id = add_clip(&mut lane, 99_000_000.0, 16.0, 4);
+        index.insert(id, lane.clips.len()-1);
+        add_ms.push(start.elapsed().as_secs_f64()*1000.0);
+        black_box(index);
+
+        let mut lane = fixture.song.channels[1].lanes[0].clone();
+        let mut index: HashMap<u32, usize> = lane.clips.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+        let source_id = lane.clips[100].id;
+        let start = Instant::now();
+        let id = copy_clip(&mut lane, source_id, 16.0).unwrap();
+        index.insert(id, lane.clips.len()-1);
+        copy_ms.push(start.elapsed().as_secs_f64()*1000.0);
+        black_box(index);
+
+        let mut lane = fixture.song.channels[1].lanes[0].clone();
+        let mut index: HashMap<u32, usize> = lane.clips.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+        let removed = 2048usize;
+        let id = lane.clips[removed].id;
+        let start = Instant::now();
+        assert!(delete_clip(&mut lane, id));
+        index.remove(&id);
+        for position in index.values_mut() {
+            if *position > removed { *position -= 1; }
+        }
+        delete_ms.push(start.elapsed().as_secs_f64()*1000.0);
+        black_box(index);
+
+        let mut lane = fixture.song.channels[1].lanes[0].clone();
+        let id = lane.clips[100].id;
+        let index: HashMap<u32, usize> = lane.clips.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+        let start = Instant::now();
+        lane.clips[100].start_tick += 16;
+        black_box(index.get(&id));
+        same_lane_move_ms.push(start.elapsed().as_secs_f64()*1000.0);
+
+        let mut song = fixture.song.clone();
+        song.add_channel(crate::song::ChannelKind::AudioClip);
+        for i in 0..32 { song.channels[2].lanes[0].add_clip(i * 16, 1.0); }
+        let source = &song.channels[1].lanes[0];
+        let moving_id = source.clips[21].id;
+        let from_index = 21usize;
+        let mut from: HashMap<u32, usize> = source.clips.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+        let mut to: HashMap<u32, usize> = song.channels[2].lanes[0].clips.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+        let source_ref = ClipRef { channel: 1, lane: 0, id: moving_id };
+        let start = Instant::now();
+        let moved = move_clips(&mut song, &[(source_ref, (2, 0))])[0];
+        from.remove(&moving_id);
+        for position in from.values_mut() {
+            if *position > from_index { *position -= 1; }
+        }
+        to.insert(moved.id, song.channels[2].lanes[0].clips.len()-1);
+        cross_lane_move_ms.push(start.elapsed().as_secs_f64()*1000.0);
+        assert_eq!(moved.channel, 2);
+        black_box((from, to));
+
+        // Loading/replacing a project invalidates the old map; this measures rebuilding from the loaded song only,
+        // not file parsing or asset decoding.
+        let loaded = fixture.song.clone();
+        let start = Instant::now();
+        let loaded_index: HashMap<u32, usize> = loaded.channels[1].lanes[0].clips.iter()
+            .enumerate().map(|(i, c)| (c.id, i)).collect();
+        load_index_ms.push(start.elapsed().as_secs_f64()*1000.0);
+        black_box(loaded_index);
+    }
+    let median = |v: &mut Vec<f64>| { v.sort_by(f64::total_cmp); quantile(v, 0.5) };
+    println!("CLIP_PROFILE {}", serde_json::json!({
+        "phase":"index_maintenance", "clips":4096, "repeats":9,
+        "build_ms":median(&mut build_ms), "load_rebuild_ms_excluding_parse_and_assets":median(&mut load_index_ms),
+        "add_plus_insert_ms":median(&mut add_ms), "copy_plus_insert_ms":median(&mut copy_ms),
+        "delete_plus_stable_order_reindex_ms":median(&mut delete_ms),
+        "same_lane_start_move_index_work_ms":median(&mut same_lane_move_ms),
+        "cross_lane_move_plus_two_map_updates_ms":median(&mut cross_lane_move_ms),
+        "cross_lane_target_id_collision":true,
+        "persistent_index_correctness_tested":false
+    }));
+}
+
 fn profile_ui(f: &Fixture, cache: &mut SampleCache, files: &ProjectFiles, view: &str, motion: &str, repeat: usize) {
     let ctx = egui::Context::default();
+    let indexed_ctx = egui::Context::default();
     let theme = crate::theme::theme_by_id(0);
     let m = crate::ui::offscreen::metrics();
     let cx = UiCtx { theme: &theme, m: &m };
@@ -174,6 +274,10 @@ fn profile_ui(f: &Fixture, cache: &mut SampleCache, files: &ProjectFiles, view: 
     let refs: Vec<_> = lane.clips.iter().map(|c| ClipRef { channel:1,lane:0,id:c.id }).collect();
     let mut totals: Vec<f64> = Vec::new();
     let mut sums = [0.0_f64; 9];
+    let mut indexed_paint_totals = Vec::new();
+    let mut indexed_alloc_calls = 0usize;
+    let mut indexed_alloc_bytes = 0usize;
+    let mut indexed_capacity = 0usize;
     let mut calls = 0usize;
     let mut bytes = 0usize;
     let mut visible = 0;
@@ -229,20 +333,69 @@ fn profile_ui(f: &Fixture, cache: &mut SampleCache, files: &ProjectFiles, view: 
         vertices=primitives.iter().map(|p|match &p.primitive { egui::epaint::Primitive::Mesh(m)=>m.vertices.len(),_=>0 }).sum();
         black_box(primitives);
         let tess=start.elapsed().as_secs_f64()*1000.0;
+        let baseline_total_ms = total.elapsed().as_secs_f64()*1000.0;
+
         if measured {
-            totals.push(total.elapsed().as_secs_f64()*1000.0);
-            cpu+=cpu_ms()-cpu_start;
-            let a=allocations::end();calls+=a.0;bytes+=a.1;
+            let a = allocations::end();
+            calls += a.0;
+            bytes += a.1;
+            cpu += cpu_ms()-cpu_start;
+        }
+        // Test-only frame-local per-lane ID->position index, covering visible resolution, paint and tessellation.
+        // Build and map allocation are included; production continues to use find(song, ClipRef).
+        let indexed_total = Instant::now();
+        if measured { allocations::start(); }
+        let mut indexed = HashMap::with_capacity(lane.clips.len());
+        for (position, clip) in lane.clips.iter().enumerate() {
+            indexed.insert(clip.id, position);
+        }
+        let capacity = indexed.capacity();
+        if measured {
+            let a = allocations::end();
+            indexed_alloc_calls += a.0;
+            indexed_alloc_bytes += a.1;
+            indexed_capacity = capacity;
+        }
+        let indexed_output = indexed_ctx.run(egui::RawInput {
+            screen_rect:Some(grid), time:Some(frame as f64/60.0), ..Default::default()
+        }, |ctx| {
+            let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(grid);
+            for &(r, rect) in &blocks {
+                let clip = lane.clips.get(*indexed.get(&r.id).expect("indexed visible clip"))
+                    .filter(|clip| clip.id == r.id).expect("index resolves requested clip ID");
+                let wave = audio_wave(cache, files, clip, f.song.tempo_bpm);
+                paint_clip(&painter, &cx, &f.song.channels[1], lane, clip,
+                    wave.as_ref().map(|(s,w)|(s,*w)), Look::default(), clip_box(rect,&m), axis);
+            }
+        });
+        let indexed_shapes = indexed_output.shapes.len();
+        let start = Instant::now();
+        let indexed_primitives = indexed_ctx.tessellate(indexed_output.shapes, 1.0);
+        let indexed_vertices: usize = indexed_primitives.iter().map(|p| match &p.primitive {
+            egui::epaint::Primitive::Mesh(mesh) => mesh.vertices.len(), _ => 0
+        }).sum();
+        black_box(indexed_primitives);
+        let indexed_tess = start.elapsed().as_secs_f64()*1000.0;
+        assert_eq!((indexed_shapes, indexed_vertices), (shapes, vertices), "indexed lookup must paint same shape/vertex counts");
+        if measured {
+            indexed_paint_totals.push(indexed_total.elapsed().as_secs_f64()*1000.0);
+            totals.push(baseline_total_ms);
             for (s,v) in sums.iter_mut().zip([layout,lookup,selected,index_build,indexed_lookup,indexed_selected,hit,paint,tess]) { *s+=v; }
         }
     }
     totals.sort_by(f64::total_cmp);
+    indexed_paint_totals.sort_by(f64::total_cmp);
     println!("CLIP_PROFILE {}",serde_json::json!({"phase":"ui_attribution","case":f.kind,"hits":f.logical_hits,
         "clips":n,"view":view,"motion":motion,"repeat":repeat,"frames":24,"visible":visible,
         "p50_ms":quantile(&totals,0.5),"p95_ms":quantile(&totals,0.95),"p99_ms":quantile(&totals,0.99),
         "layout_ms":sums[0]/24.0,"lookup_ms":sums[1]/24.0,"all_selected_lookup_ms":sums[2]/24.0,
         "index_build_ms":sums[3]/24.0,"indexed_lookup_ms":sums[4]/24.0,"all_selected_indexed_ms":sums[5]/24.0,
         "hit_rect_scan_ms":sums[6]/24.0,"paint_ms":sums[7]/24.0,"tessellate_ms":sums[8]/24.0,
+        "indexed_paint_tess_p50_ms":quantile(&indexed_paint_totals,0.5),
+        "indexed_paint_tess_p95_ms":quantile(&indexed_paint_totals,0.95),
+        "indexed_map_capacity":indexed_capacity,
+        "indexed_map_alloc_calls_per_frame":indexed_alloc_calls/24,
+        "indexed_map_requested_alloc_bytes_per_frame":indexed_alloc_bytes/24,
         "alloc_calls_per_frame":calls/24,"requested_alloc_bytes_per_frame":bytes/24,
         "shapes":shapes,"vertices":vertices,"cpu_ms_per_frame":cpu/24.0,"rss_kib":rss_kib(),
         "gpu_fps":null,"hardware_xruns":null,"includes_full_app":false}));

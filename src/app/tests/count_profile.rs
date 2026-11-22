@@ -116,6 +116,64 @@ fn high_clip_count_playlist_interactions() {
 }
 
 #[test]
+#[ignore = "diagnose dense short-clip end-handle capture; Linux/headless only"]
+fn high_clip_count_dense_resize_hit_test_diagnostic() {
+    assert!(!cfg!(debug_assertions));
+    for isolate_following_clips in [false, true] {
+        let case = if isolate_following_clips { "following_clips_out_of_view" } else { "dense_adjacent" };
+        let fixture = crate::ui::clips::count_profile::fixture("audio", 4096);
+        let target_index = 20;
+        let target_id = fixture.song.channels[1].lanes[0].clips[target_index].id;
+        let mut source = fixture.song.clone();
+        if isolate_following_clips {
+            for (i, clip) in source.channels[1].lanes[0].clips.iter_mut().enumerate().skip(target_index + 1) {
+                clip.start_tick = 100_000_000 + i as u32 * 1000;
+            }
+        }
+        let mut results = Vec::new();
+        for _ in 0..5 {
+            let mut rig = Rig::new();
+            rig.app.audio.samples.load(&source, &|_| Some(fixture.wav.clone()));
+            rig.app.song = source.clone();
+            rig.app.selected_channel = 1;
+            rig.pin_playlist();
+            rig.app.main_screen.zoom = (10.0_f32 / (0.25 * 38.4)).log2();
+            rig.frame(vec![]);
+            let lane_id = egui::Id::new(("clip_lane", 1_usize, 0_usize));
+            let lane = rig.ctx.read_response(lane_id).expect("playlist lane drawn").rect;
+            let start = pos2(lane.left() + target_index as f32 * 10.0 + 5.0, lane.center().y);
+            rig.press(start);
+            rig.release(start);
+            for _ in 0..4 { rig.frame(vec![]); }
+            assert_eq!(rig.app.main_screen.clips.selected.map(|r| r.id), Some(target_id));
+            rig.app.main_screen.clips.row.hide();
+            rig.frame(vec![]);
+            let handle_id = egui::Id::new(("clip_handle", crate::ui::clips::Part::End));
+            let response = rig.ctx.read_response(handle_id).expect("end handle response registered");
+            let handle = response.rect;
+            let from = handle.center();
+            let before = rig.app.song.channels[1].lanes[0].clips.iter()
+                .find(|clip| clip.id == target_id).unwrap().visible_ticks();
+            rig.press(from);
+            let captured = rig.ctx.read_response(handle_id).is_some_and(|r| r.is_pointer_button_down_on());
+            rig.drag_to(from + vec2(28.0, 0.0));
+            rig.release(from + vec2(28.0, 0.0));
+            let after = rig.app.song.channels[1].lanes[0].clips.iter()
+                .find(|clip| clip.id == target_id).unwrap().visible_ticks();
+            results.push(serde_json::json!({
+                "captured":captured, "resized":before != after, "before_ticks":before,
+                "after_ticks":after, "press_at":format!("{:?}",from),
+                "handle_response_rect":format!("{:?}",handle), "lane_rect":format!("{:?}",lane)
+            }));
+        }
+        println!("CLIP_PROFILE {}", serde_json::json!({
+            "phase":"resize_hit_test_diagnostic", "case":case, "clips":source.channels[1].lanes[0].clips.len(),
+            "target_index":target_index, "repeats":results
+        }));
+    }
+}
+
+#[test]
 #[ignore = "controlled release full-app clip count profile"]
 fn high_clip_count_full_app() {
     assert!(!cfg!(debug_assertions));
