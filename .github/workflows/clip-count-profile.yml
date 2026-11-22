@@ -1,0 +1,38 @@
+name: High clip count investigation
+on:
+  push:
+    branches: ['arena/**']
+    paths: ['.github/workflows/clip-count-profile.yml', 'src/ui/clips/count_profile.rs']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Build attribution harness outside measurements
+        run: |
+          mkdir -p measurements
+          rustfmt --edition 2024 src/ui/clips/count_profile.rs
+          cargo test --release --lib high_clip_count_profile --no-run > measurements/build.log 2>&1 || { tail -100 measurements/build.log; exit 1; }
+      - name: Measure production helpers and offline engine
+        run: |
+          lscpu > measurements/host.txt
+          /usr/bin/time -v -o measurements/resources.txt cargo test --release --lib high_clip_count_profile -- --ignored --nocapture --test-threads=1 > measurements/profile.log 2>&1 || { tail -80 measurements/profile.log; exit 1; }
+          python3 tools/analyze-clip-count-profile.py measurements/profile.log measurements
+          cat measurements/REPORT.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clip-count-investigation
+          path: measurements
+          retention-days: 30
