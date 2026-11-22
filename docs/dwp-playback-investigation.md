@@ -16,7 +16,7 @@ The DW sampler selects the zone using the note plus the configured Pitch offset 
 
 At the zone root, default Pitch/Fine/bend, and a neutral pitch envelope/LFO, this yields the sample's native rate corrected only for output sample rate. No global octave factor is apparent in this path. Zone root and keytrack are correctly used by the implementation as MIDI-note units and cents per key, respectively. The CSTM PB-range affects bend range, not ordinary note pitch.
 
-The current code may still differ from FL Studio Mobile because the DWP field interpretation, a source instrument's stored metadata, a preset/module parameter, or a note-number mapping could be wrong. The code audit alone cannot distinguish those possibilities. In particular, the app's “Set middle C to C4” setting changes note labels, not the MIDI pitch; comparing displayed octave labels between apps is not sufficient to establish equal MIDI note numbers.
+The current code may still differ from FL Studio Mobile because the DWP field interpretation, a source instrument's stored metadata, a preset/module parameter, or a note-number mapping could be wrong. The code audit alone cannot distinguish those possibilities. One especially important control is octave-label convention: Bana Forge defaults to labelling MIDI 60 as C5 and has a “Set middle C to C4” setting that changes the label only; it does not alter MIDI pitch. If the two apps use different middle-C names and the test matched displayed note labels rather than the MIDI number, the user could have played notes 12 semitones apart, exactly matching this measured 2× ratio without a DWP engine bug. That is a plausible suspect, not a conclusion; obtain MIDI note numbers before judging. A 2× sample-rate interpretation error is another possibility, but would also change playback duration/rate and must be checked against the raw preset/sample metadata.
 
 ### Existing tests and their limits
 
@@ -44,7 +44,7 @@ The same near-exact 2× difference in both pairs confirms that the supplied outp
 
 ## Next evidence required before an audio change
 
-Provide the exact `.dwp` files for at least two affected instruments plus every referenced sample file (or the self-contained files if embedded), the four original audio recordings, and ideally the equivalent FL Studio Mobile project/export with MIDI note numbers or a MIDI file. Include each app's pitch/fine/bend settings, velocity, sample rate/output rate and note-on/off times. With those, compare the same source, zone, MIDI key and duration at multiple keys, including keys on both sides of zone boundaries, then compare looped/enveloped presets. Until then, do not add a global +/−12 semitone correction or change DWP root semantics: either can break correctly mapped instruments.
+The four recordings have been supplied and analyzed. Next provide the exact `.dwp` files for at least two affected instruments plus every referenced sample file (or self-contained embedded programs), and ideally the equivalent FL Studio Mobile project/export with MIDI note numbers or a MIDI file. Include each app's pitch/fine/bend settings, velocity, sample rate/output rate and note-on/off times. With those, compare the same source, zone, MIDI key and duration at multiple keys, including keys on both sides of zone boundaries, then compare looped/enveloped presets. Until then, do not add a global +/−12 semitone correction or change DWP root semantics: either can break correctly mapped instruments.
 
 ## Playtest APK
 
