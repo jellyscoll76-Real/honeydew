@@ -36,9 +36,9 @@ fn high_clip_count_playlist_interactions() {
                     }
                     "move_drag" => {
                         rig.press(start);
-                        rig.drag_to(start + vec2(4.0, 0.0));
                         rig.drag_to(start + vec2(12.0, 0.0));
-                        rig.release(start + vec2(12.0, 0.0));
+                        rig.drag_to(start + vec2(32.0, 0.0));
+                        rig.release(start + vec2(32.0, 0.0));
                         let moved = rig.app.song.channels[1].lanes[0].clips.iter()
                             .find(|clip| clip.id == original_id).expect("moved clip remains");
                         assert_ne!(moved.start_tick, original_start, "body drag must move the first clip");
@@ -51,8 +51,8 @@ fn high_clip_count_playlist_interactions() {
                         let handle = rig.ctx.read_response(id).expect("selected clip end handle drawn").rect;
                         let from = handle.center();
                         rig.press(from);
-                        rig.drag_to(from + vec2(8.0, 0.0));
-                        rig.release(from + vec2(8.0, 0.0));
+                        rig.drag_to(from + vec2(28.0, 0.0));
+                        rig.release(from + vec2(28.0, 0.0));
                         let resized = rig.app.song.channels[1].lanes[0].clips.iter()
                             .find(|clip| clip.id == original_id).expect("resized clip remains");
                         assert_ne!(resized.visible_ticks(), original_len, "end-handle drag must resize the clip");
