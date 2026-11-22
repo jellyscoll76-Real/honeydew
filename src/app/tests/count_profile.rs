@@ -34,6 +34,11 @@ fn high_clip_count_playlist_interactions() {
                     rig.release(start);
                     for _ in 0..4 { rig.frame(vec![]); }
                     assert!(rig.app.main_screen.clips.selected.is_some(), "clip must be selected before drag");
+                    if action == "resize_drag" {
+                        // Keep the intentionally floating action row from covering a sub-pixel dense clip's handle.
+                        rig.app.main_screen.clips.row.hide();
+                        rig.frame(vec![]);
+                    }
                 }
                 let mut effect = false;
                 let mut current_handle_rect = None;
