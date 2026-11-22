@@ -29,7 +29,6 @@ for row in rows:
     if row['phase'] == 'ui_attribution':
         groups[(row['case'], row['hits'], row['view'], row['motion'])].append(row)
 for (case, hits, view, motion), group in groups.items():
-    assert len(group) == 3
     med = lambda key: statistics.median(r[key] for r in group)
     fields = [med(k) for k in ['layout_ms','lookup_ms','all_selected_lookup_ms','hit_rect_scan_ms','paint_ms','tessellate_ms']]
     lines.append(f'| {case} | {hits} | {med("clips"):g} | {view} | {motion} | {med("visible"):g} | ' +
@@ -43,8 +42,41 @@ lines += ['', '## Offline audio CPU (not hardware playback)', '',
 for r in rows:
     if r['phase'] == 'offline_audio':
         lines.append(f'| {r["case"]} | {r["hits"]} | {r["clips"]} | {r["prepare_ms"]:.3f} | {r["p50_ms"]:.4f} | {r["p95_ms"]:.4f} | {r["p99_ms"]:.4f} | {r["over_budget_blocks"]} | {r["energy"]:.3f} | {r["rss_kib"]} |')
+lines += ['', '## Full-app headless frames (milliseconds per frame; fake audio sink, no GPU)', '',
+          'Complete BanaForgeApp frames via the test Rig: UI pass plus separate egui tessellation. Recorder is a fake sink; **not hardware playback, device FPS or input latency**.', '',
+          '| Case | Hits | Clips | View | Mode | UI p50 | UI p95 | UI p99 | Tess p50 | Tess p95 |', '|---|---:|---:|---|---|---:|---:|---:|---:|---:|']
+for r in rows:
+    if r['phase'] == 'full_app_cpu':
+        lines.append(f"| {r['case']} | {r['hits']} | {r['clips']} | {r['view']} | {r['mode']} | {r['ui_p50_ms']:.3f} | {r['ui_p95_ms']:.3f} | {r['ui_p99_ms']:.3f} | {r['tess_p50_ms']:.3f} | {r['tess_p95_ms']:.3f} |")
 lines += ['', 'Cold asset read counts, lazy summary timings, per-case RSS, process CPU time, shape/vertex counts and allocation requests are in data.json.',
           'Allocation bytes count requests/reallocations, not live memory; RSS is process-wide with retained allocator/cache memory, not isolated fixture ownership.',
           'resources.txt records whole-test CPU/peak RSS, excluding compilation. No claims of musical-output equivalence or actual playback stability follow from these measurements.']
 (destination / 'REPORT.md').write_text('\n'.join(lines) + '\n')
+
+# Compact medians for the annotation channel (full data.json stays in the artifact).
+summary = {'ui_attribution': {}, 'full_app_cpu': {}, 'offline_audio': [], 'cold_assets': []}
+for (case, hits, view, motion), group in groups.items():
+    med = lambda key: round(statistics.median(r[key] for r in group), 4)
+    summary['ui_attribution'][f'{case}|{hits}|{view}|{motion}'] = {
+        'clips': med('clips'), 'visible': med('visible'),
+        'layout_ms': med('layout_ms'), 'lookup_ms': med('lookup_ms'),
+        'all_selected_lookup_ms': med('all_selected_lookup_ms'),
+        'hit_rect_scan_ms': med('hit_rect_scan_ms'), 'paint_ms': med('paint_ms'),
+        'tessellate_ms': med('tessellate_ms'),
+        'alloc_calls_per_frame': med('alloc_calls_per_frame'),
+        'requested_alloc_bytes_per_frame': med('requested_alloc_bytes_per_frame'),
+        'repeats': len(group)}
+for r in rows:
+    if r['phase'] == 'full_app_cpu':
+        summary['full_app_cpu'][f"{r['case']}|{r['hits']}|{r['view']}|{r['mode']}"] = {
+            'clips': r['clips'], 'ui_p50_ms': round(r['ui_p50_ms'], 4),
+            'ui_p95_ms': round(r['ui_p95_ms'], 4), 'ui_p99_ms': round(r['ui_p99_ms'], 4),
+            'tess_p50_ms': round(r['tess_p50_ms'], 4), 'tess_p95_ms': round(r['tess_p95_ms'], 4)}
+    elif r['phase'] == 'offline_audio':
+        summary['offline_audio'].append({k: (round(v, 4) if isinstance(v, float) else v)
+            for k, v in r.items() if k != 'phase'})
+    elif r['phase'] == 'cold_assets':
+        summary['cold_assets'].append({k: (round(v, 4) if isinstance(v, float) else v)
+            for k, v in r.items() if k != 'phase'})
+(destination / 'summary.json').write_text(json.dumps(summary, separators=(',', ':')) + '\n')
 print(f'Summarized {len(rows)} measurements')
