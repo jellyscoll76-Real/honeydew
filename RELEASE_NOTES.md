@@ -1,3 +1,10 @@
+BanaForge 0.5.33 — update-signing safeguards (not released: original signing key required)
+
+- Audit confirms delivered v0.5.31 and v0.5.32 have the same package and increasing version codes, but different signing certificates. The former playtest workflow generated disposable release keys when signing secrets were absent; those APKs cannot update each other in place.
+- Remove release-key generation fallback. Both CI release paths and local distribution enforce the pinned signer, stable application ID, Cargo version and native ABI policy. Validate existing keys without exposing credentials through step outputs. Missing/wrong keys block APK publication instead of producing another incompatible build.
+- Add predecessor-APK comparison and public identity reporting, version-code bounds and regression coverage. No project/settings storage, permissions, data migration or audio code changes.
+- No in-place installation/data-retention tests or fixed APK are claimed while the original private key is unavailable. See ANDROID_UPDATE_SAFETY.md. Do not uninstall an existing installation to bypass a signature error.
+
 BanaForge 0.5.32 — cross-project clipboard and lane action touch polish
 
 - Retain owned playlist clip snapshots when switching projects. Cross-project audio, note-pattern and drum-pattern pastes find existing compatible lanes nearest their source playlist position, independently of the vertical cursor. No tracks/racks/instruments are created or replaced; unmatched clips are skipped. Drum racks must already contain the referenced pad slots. Same-project paste placement remains unchanged.

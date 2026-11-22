@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Signing and update policy regressions
+        run: python3 -m unittest discover -s tools -p test_android_update.py -v
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

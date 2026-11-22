@@ -115,6 +115,10 @@ android/gradlew -p android --no-daemon "$task"
 
 apk=$BANAFORGE_ANDROID_BUILD_DIR/outputs/apk/$variant/app-$variant.apk
 "$sdk_tools/apksigner" verify "$apk"
+if [ "$variant" = release ]; then
+    # Local releases obey the same signer/package/version gate as CI releases.
+    python3 tools/verify_android_update.py "$apk" --tools "$sdk_tools" --abis "$abi_mode"
+fi
 "$sdk_tools/zipalign" -c -P 16 4 "$apk"
 # Validate real machine code and linker/JNI dependencies, never just manifest declarations.
 readelf=$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -path '*/bin/llvm-readelf' | head -n 1)

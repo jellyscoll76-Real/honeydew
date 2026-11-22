@@ -5,6 +5,9 @@ plugins {
 def version = (file('../../Cargo.toml').text =~ /(?m)^version = "(\d+)\.(\d+)\.(\d+)"$/)[0]
 def (major, minor, patch) = version[1..3].collect { it.toInteger() }
 assert minor < 1000 && patch < 1000
+// Android/Play version codes are bounded integers, not display strings.
+def releaseVersionCode = major * 1000000L + minor * 1000L + patch
+assert releaseVersionCode > 0 && releaseVersionCode <= 2100000000L
 
 def buildDirPath = providers.environmentVariable('BANAFORGE_ANDROID_BUILD_DIR').orNull ?: '../../target/android'
 layout.buildDirectory = file(buildDirPath)
@@ -26,7 +29,7 @@ android {
         applicationId = 'dev.daijro.banaforge'
         minSdk = 26
         targetSdk = 36
-        versionCode = major * 1000000 + minor * 1000 + patch
+        versionCode = releaseVersionCode.toInteger()
         versionName = "${major}.${minor}.${patch}"
         resValue 'string', 'app_name', 'BanaForge'
         resourceConfigurations += ['en']
