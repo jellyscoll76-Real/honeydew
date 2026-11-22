@@ -138,10 +138,21 @@ pub(crate) fn action_bubble_button(
     let rect = Rect::from_center_size(center, Vec2::splat(hit));
     let response = focus::interact(ui, rect, id, Sense::click_and_drag());
     let down = feedback || response.is_pointer_button_down_on() || response.clicked();
-    let fill = if down { c.text.to_color32().gamma_multiply(0.82) } else { c.text.to_color32() };
+    let fill = if down {
+        c.text.to_color32().gamma_multiply(0.82)
+    } else {
+        c.text.to_color32()
+    };
     let growth = if down { 1.06 } else { 1.0 };
-    ui.painter().circle_filled(center, diameter * scale * growth / 2.0, fill);
-    ui.painter().text(center, Align2::CENTER_CENTER, label, font, c.menu_fill.to_color32());
+    ui.painter()
+        .circle_filled(center, diameter * scale * growth / 2.0, fill);
+    ui.painter().text(
+        center,
+        Align2::CENTER_CENTER,
+        label,
+        font,
+        c.menu_fill.to_color32(),
+    );
     response
 }
 
@@ -332,12 +343,25 @@ mod tests {
         let mut rig = Offscreen::new();
         let draw = |rig: &mut Offscreen, flash: bool| {
             rig.frame(vec![], &mut |ui, cx| {
-                action_bubble_button(ui, Id::new("action"), CENTER, 40.0, 56.0, 1.0, flash,
-                    "Copy", FontId::proportional(10.0), &cx.theme.colors);
-            }).into_iter().filter_map(|s| match s.shape {
+                action_bubble_button(
+                    ui,
+                    Id::new("action"),
+                    CENTER,
+                    40.0,
+                    56.0,
+                    1.0,
+                    flash,
+                    "Copy",
+                    FontId::proportional(10.0),
+                    &cx.theme.colors,
+                );
+            })
+            .into_iter()
+            .filter_map(|s| match s.shape {
                 egui::Shape::Circle(c) => Some((c.radius, c.fill)),
                 _ => None,
-            }).collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
         };
         let normal = draw(&mut rig, false);
         let pressed = draw(&mut rig, true);
@@ -348,8 +372,19 @@ mod tests {
         let mut clicked = false;
         // In touch padding, outside the visible circle (also outside its bounding square).
         rig.click(CENTER + vec2(25.0, 0.0), &mut |ui, cx| {
-            clicked |= action_bubble_button(ui, Id::new("action"), CENTER, 40.0, 56.0, 1.0, false,
-                "Copy", FontId::proportional(10.0), &cx.theme.colors).clicked();
+            clicked |= action_bubble_button(
+                ui,
+                Id::new("action"),
+                CENTER,
+                40.0,
+                56.0,
+                1.0,
+                false,
+                "Copy",
+                FontId::proportional(10.0),
+                &cx.theme.colors,
+            )
+            .clicked();
         });
         assert!(clicked);
     }

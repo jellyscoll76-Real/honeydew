@@ -1025,10 +1025,12 @@ impl Clips {
         // A clip whose track is gone goes from the clipboard.
         if !self.clipboard_foreign {
             let kept = std::mem::take(&mut self.clipboard).into_iter();
-            self.clipboard = kept.filter_map(|mut entry| {
-                entry.source = map(entry.source)?;
-                Some(entry)
-            }).collect();
+            self.clipboard = kept
+                .filter_map(|mut entry| {
+                    entry.source = map(entry.source)?;
+                    Some(entry)
+                })
+                .collect();
         }
     }
 
@@ -1107,8 +1109,15 @@ impl Clips {
             EditKey::Cut | EditKey::Delete => {}
             EditKey::Paste => {
                 let show = app.settings.show_hidden_tracks;
-                let pasted =
-                    paste_clips(app.song, &self.clipboard, self.clipboard_foreign, tick, (channel, lane), snap, show);
+                let pasted = paste_clips(
+                    app.song,
+                    &self.clipboard,
+                    self.clipboard_foreign,
+                    tick,
+                    (channel, lane),
+                    snap,
+                    show,
+                );
                 if !pasted.is_empty() {
                     self.set_selection(pasted);
                     app.song_edited(true);
@@ -1317,8 +1326,15 @@ impl Clips {
             }
             Some(Tap::Button(_)) => {
                 let show = app.settings.show_hidden_tracks;
-                let pasted =
-                    paste_clips(app.song, &self.clipboard, self.clipboard_foreign, tick, (channel, lane), snap, show);
+                let pasted = paste_clips(
+                    app.song,
+                    &self.clipboard,
+                    self.clipboard_foreign,
+                    tick,
+                    (channel, lane),
+                    snap,
+                    show,
+                );
                 if !pasted.is_empty() {
                     self.set_selection(pasted);
                     app.song_edited(true);
@@ -1620,7 +1636,9 @@ impl Clips {
                     source: r,
                     kind,
                     clip: find(song, r)?.clone(),
-                    order: order.iter().position(|&track| track == (r.channel, r.lane))?,
+                    order: order
+                        .iter()
+                        .position(|&track| track == (r.channel, r.lane))?,
                 })
             })
             .collect();
@@ -3339,9 +3357,10 @@ pub fn copy_clip(lane: &mut Lane, id: u32, grid: f64) -> Option<u32> {
 /// back on its own track; a track that is gone or of another kind takes nothing, nor does a hidden one (`Hide track`)
 /// unless `show_hidden` (Settings `Show hidden tracks`). Returns the copies (new ids).
 fn playlist_lanes(song: &Song) -> Vec<(usize, usize)> {
-    song.playlist().into_iter().flat_map(|c| {
-        (0..song.channels[c].lanes.len()).map(move |l| (c, l))
-    }).collect()
+    song.playlist()
+        .into_iter()
+        .flat_map(|c| (0..song.channels[c].lanes.len()).map(move |l| (c, l)))
+        .collect()
 }
 
 fn paste_clips(
@@ -3394,7 +3413,9 @@ fn paste_clips(
         } else {
             Some((r.channel, r.lane))
         };
-        let Some((c, l)) = destination else { continue; };
+        let Some((c, l)) = destination else {
+            continue;
+        };
         let fits = |t: &&mut Lane| t.kind == k && (show_hidden || !t.hidden);
         let Some(target) = lane_mut(song, c, l).filter(fits) else {
             continue;
@@ -3404,9 +3425,17 @@ fn paste_clips(
         copy.start_tick = (at + f64::from(clip.start_tick - first)).round() as u32;
         // Scan each destination once, not once per pasted clip in a dense group.
         let max_id = next_ids.entry((c, l)).or_insert_with(|| {
-            target.clips.iter().map(|c| c.id).max().unwrap_or(0).max(target.last_clip_id)
+            target
+                .clips
+                .iter()
+                .map(|c| c.id)
+                .max()
+                .unwrap_or(0)
+                .max(target.last_clip_id)
         });
-        let Some(id) = max_id.checked_add(1) else { continue; };
+        let Some(id) = max_id.checked_add(1) else {
+            continue;
+        };
         *max_id = id;
         target.last_clip_id = id;
         copy.id = id;
@@ -4083,7 +4112,11 @@ fn action_row_layout(width: f32, count: usize, desired: f32, margin: f32) -> (us
     let slot = desired.max(44.0).min(room);
     let columns = ((room / slot).floor() as usize).max(1).min(count.max(1));
     let rows = count.div_ceil(columns);
-    (columns, slot, vec2(columns as f32 * slot, rows as f32 * slot))
+    (
+        columns,
+        slot,
+        vec2(columns as f32 * slot, rows as f32 * slot),
+    )
 }
 
 /// A floating row's pop-in scale at `a` (1 when settled).
@@ -4210,7 +4243,11 @@ mod tests {
 
     fn copied_source() -> (Song, Clips) {
         let mut song = Song::default();
-        for kind in [ChannelKind::AudioClip, ChannelKind::Instrument, ChannelKind::Drums] {
+        for kind in [
+            ChannelKind::AudioClip,
+            ChannelKind::Instrument,
+            ChannelKind::Drums,
+        ] {
             song.add_channel(kind);
         }
         let mut refs = Vec::new();
@@ -4230,11 +4267,20 @@ mod tests {
                 c.events = vec![note(0, 64)];
             } else {
                 c.events = vec![Event::Drum {
-                    pos: 32, len_beats: 0.25, pad: 2, velocity: 90,
-                    pan: 100, value: 30000, repeat: 2,
+                    pos: 32,
+                    len_beats: 0.25,
+                    pad: 2,
+                    velocity: 90,
+                    pan: 100,
+                    value: 30000,
+                    repeat: 2,
                 }];
             }
-            refs.push(ClipRef { channel, lane: 0, id: c.id });
+            refs.push(ClipRef {
+                channel,
+                lane: 0,
+                id: c.id,
+            });
         }
         let mut state = Clips::default();
         state.set_selection(refs);
@@ -4260,16 +4306,32 @@ mod tests {
         let (_, mut state) = copied_source();
         state.project_replaced();
         let mut target = Song::default();
-        for k in [ChannelKind::Drums, ChannelKind::AudioClip, ChannelKind::Instrument, ChannelKind::EffectTrack] {
+        for k in [
+            ChannelKind::Drums,
+            ChannelKind::AudioClip,
+            ChannelKind::Instrument,
+            ChannelKind::EffectTrack,
+        ] {
             target.add_channel(k);
         }
         // Overlap must be allowed and the existing audio must remain byte-for-byte unchanged.
         let existing = target.channels[2].lanes[0].add_clip(1024, 16.0).clone();
         let racks: Vec<_> = target.channels.iter().map(|c| c.rack.clone()).collect();
         let channels = target.channels.len();
-        let pasted = paste_clips(&mut target, &state.clipboard, true, 1024.0, (4, 0), 128.0, false);
+        let pasted = paste_clips(
+            &mut target,
+            &state.clipboard,
+            true,
+            1024.0,
+            (4, 0),
+            128.0,
+            false,
+        );
         assert_eq!(pasted.len(), 3);
-        assert_eq!(pasted.iter().map(|r| r.channel).collect::<Vec<_>>(), [2, 3, 1]);
+        assert_eq!(
+            pasted.iter().map(|r| r.channel).collect::<Vec<_>>(),
+            [2, 3, 1]
+        );
         assert_eq!(target.channels.len(), channels);
         assert_eq!(target.channels[2].lanes[0].clips[0], existing);
         for (entry, r) in state.clipboard.iter().zip(pasted) {
@@ -4278,7 +4340,14 @@ mod tests {
             expected.start_tick = 1024 + entry.clip.start_tick - state.clipboard[0].clip.start_tick;
             assert_eq!(find(&target, r), Some(&expected));
         }
-        assert_eq!(target.channels.iter().map(|c| c.rack.clone()).collect::<Vec<_>>(), racks);
+        assert_eq!(
+            target
+                .channels
+                .iter()
+                .map(|c| c.rack.clone())
+                .collect::<Vec<_>>(),
+            racks
+        );
     }
 
     #[test]
@@ -4287,30 +4356,79 @@ mod tests {
         let mut target = Song::default();
         target.add_channel(ChannelKind::EffectTrack);
         let before = target.clone();
-        assert!(paste_clips(&mut target, &state.clipboard, true, 0.0, (1, 0), 128.0, false).is_empty());
+        assert!(
+            paste_clips(
+                &mut target,
+                &state.clipboard,
+                true,
+                0.0,
+                (1, 0),
+                128.0,
+                false
+            )
+            .is_empty()
+        );
         assert_eq!(target, before);
         target.add_channel(ChannelKind::AudioClip);
         target.channels[2].lanes[0].hidden = true;
         let before = target.clone();
-        assert!(paste_clips(&mut target, &state.clipboard, true, 0.0, (2, 0), 128.0, false).is_empty());
+        assert!(
+            paste_clips(
+                &mut target,
+                &state.clipboard,
+                true,
+                0.0,
+                (2, 0),
+                128.0,
+                false
+            )
+            .is_empty()
+        );
         assert_eq!(target, before);
-        assert_eq!(paste_clips(&mut target, &state.clipboard, true, 0.0, (1, 0), 128.0, true).len(), 1);
+        assert_eq!(
+            paste_clips(
+                &mut target,
+                &state.clipboard,
+                true,
+                0.0,
+                (1, 0),
+                128.0,
+                true
+            )
+            .len(),
+            1
+        );
     }
 
     #[test]
     fn cross_project_multiple_matches_use_nearest_source_organization_and_repeat_safely() {
         let (_, mut state) = copied_source();
-        state.clipboard.retain(|entry| entry.kind == LaneKind::Notes);
+        state
+            .clipboard
+            .retain(|entry| entry.kind == LaneKind::Notes);
         state.clipboard[0].order = 3;
         let mut target = Song::default();
-        for k in [ChannelKind::Instrument, ChannelKind::AudioClip, ChannelKind::Instrument, ChannelKind::Instrument] {
+        for k in [
+            ChannelKind::Instrument,
+            ChannelKind::AudioClip,
+            ChannelKind::Instrument,
+            ChannelKind::Instrument,
+        ] {
             target.add_channel(k);
         }
         let order = playlist_lanes(&target);
         let nearest = order[3];
         let snapshot = state.clipboard.clone();
         for _ in 0..2 {
-            let out = paste_clips(&mut target, &state.clipboard, true, 512.0, (1, 0), 128.0, false);
+            let out = paste_clips(
+                &mut target,
+                &state.clipboard,
+                true,
+                512.0,
+                (1, 0),
+                128.0,
+                false,
+            );
             assert_eq!((out[0].channel, out[0].lane), nearest);
         }
         assert_eq!(state.clipboard, snapshot);
@@ -4341,12 +4459,30 @@ mod tests {
         let mut song = Song::default();
         let mut state = Clips::default();
         let c = song.channels[0].lanes[0].add_clip(0, 4.0);
-        state.selected = Some(ClipRef { channel: 0, lane: 0, id: c.id });
+        state.selected = Some(ClipRef {
+            channel: 0,
+            lane: 0,
+            id: c.id,
+        });
         state.copy_selection(&song);
         let before = song.clone();
-        assert!(paste_clips(&mut song, &state.clipboard, true, 0.0, (0, 0), 128.0, false).is_empty());
+        assert!(
+            paste_clips(&mut song, &state.clipboard, true, 0.0, (0, 0), 128.0, false).is_empty()
+        );
         assert_eq!(song, before);
-        assert_eq!(paste_clips(&mut song, &state.clipboard, false, 0.0, (0, 0), 128.0, false).len(), 1);
+        assert_eq!(
+            paste_clips(
+                &mut song,
+                &state.clipboard,
+                false,
+                0.0,
+                (0, 0),
+                128.0,
+                false
+            )
+            .len(),
+            1
+        );
     }
 
     #[test]
@@ -4356,11 +4492,16 @@ mod tests {
             assert!(slot >= 44.0);
             assert!(size.x + 12.8 <= width + 0.01);
             assert!(size.y >= slot);
-            let rects: Vec<_> = (0..6).map(|i| Rect::from_min_size(
-                pos2((i % columns) as f32 * slot, (i / columns) as f32 * slot), Vec2::splat(slot)
-            )).collect();
+            let rects: Vec<_> = (0..6)
+                .map(|i| {
+                    Rect::from_min_size(
+                        pos2((i % columns) as f32 * slot, (i / columns) as f32 * slot),
+                        Vec2::splat(slot),
+                    )
+                })
+                .collect();
             for i in 0..6 {
-                for j in i+1..6 {
+                for j in i + 1..6 {
                     let intersection = rects[i].intersect(rects[j]);
                     assert!(!intersection.is_positive());
                 }

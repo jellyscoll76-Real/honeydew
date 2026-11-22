@@ -560,10 +560,19 @@ fn back_closes_the_topmost_message_then_the_menu_under_it() {
 fn playlist_clip_clipboard_survives_actual_project_replacement_and_routes_to_notes() {
     let mut rig = rig();
     rig.app.song.channels[1].lanes[0].clips[0].events = vec![crate::song::Event::Note {
-        pos: 0, len_beats: 0.5, key: 62, velocity: 105, pan: 70, slide: false,
+        pos: 0,
+        len_beats: 0.5,
+        key: 62,
+        velocity: 105,
+        pan: 70,
+        slide: false,
     }];
     let id = rig.app.song.channels[1].lanes[0].clips[0].id;
-    rig.app.main_screen.clips.selected = Some(crate::ui::clips::ClipRef { channel: 1, lane: 0, id });
+    rig.app.main_screen.clips.selected = Some(crate::ui::clips::ClipRef {
+        channel: 1,
+        lane: 0,
+        id,
+    });
     rig.key(Key::C, CMD);
     let source = rig.app.song.channels[1].lanes[0].clips[0].clone();
     let mut target = Song::default();
@@ -587,7 +596,12 @@ fn playlist_clip_clipboard_survives_actual_project_replacement_and_routes_to_not
 fn piano_note_clipboard_survives_actual_project_load_and_pastes_into_existing_roll() {
     let mut rig = rig();
     let note = crate::song::Event::Note {
-        pos: 0, len_beats: 1.0, key: 60, velocity: 90, pan: 100, slide: true,
+        pos: 0,
+        len_beats: 1.0,
+        key: 60,
+        velocity: 90,
+        pan: 100,
+        slide: true,
     };
     rig.app.song.channels[1].lanes[0].clips[0].events = vec![note];
     rig.edit(1);
@@ -605,5 +619,8 @@ fn piano_note_clipboard_survives_actual_project_load_and_pastes_into_existing_ro
     rig.edit(1);
     rig.frame(vec![]);
     rig.key(Key::V, CMD);
-    assert_eq!(rig.app.song.channels[1].lanes[0].clips[0].events, vec![note]);
+    assert_eq!(
+        rig.app.song.channels[1].lanes[0].clips[0].events,
+        vec![note]
+    );
 }
