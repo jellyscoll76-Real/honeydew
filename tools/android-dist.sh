@@ -6,6 +6,11 @@
 set -eu
 cd "$(dirname "$0")/.."
 
+if [ -f android/RELEASE_HOLD.md ]; then
+    echo 'APK distribution is on hold; see android/RELEASE_HOLD.md and ANDROID_KEY_RECOVERY_REPORT.md.' >&2
+    exit 1
+fi
+
 variant=debug
 task=assembleDebug
 base=

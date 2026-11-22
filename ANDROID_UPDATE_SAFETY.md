@@ -1,5 +1,8 @@
 # Android update identity — v0.5.33 preparation (release blocked)
 
+Follow-up: [key recovery and migration assessment](ANDROID_KEY_RECOVERY_REPORT.md).
+APK distribution is explicitly held by `android/RELEASE_HOLD.md` pending owner review and a verified safe path.
+
 ## Verified cause in the delivered playtest APKs
 
 The original `Android APK` workflow generated a fresh RSA release keystore whenever any of four signing secrets was missing, signed the APK, and removed the temporary keystore at the end. A successful signature/ZIP/native-library check did **not** establish continuity with the previously delivered signer. The tagged-release workflow already required secrets, but the playtest workflow did not.
