@@ -578,8 +578,17 @@ fn playlist_clip_clipboard_survives_actual_project_replacement_and_routes_to_not
     let mut target = Song::default();
     target.add_channel(crate::song::ChannelKind::AudioClip);
     target.add_channel(crate::song::ChannelKind::Instrument);
+    let secondary = target.channels[2].add_lane(crate::song::LaneKind::Notes);
+    let hidden_id = target.channels[2].lanes[secondary].add_clip(2048, 4.0).id;
     rig.app.song = target;
     rig.app.song_edited(SongEdit::Replaced, 0);
+    rig.frame(vec![]);
+    // Folding the selected secondary lane must clear transient selection, not
+    // the snapshot copied from A. The current channel still points to audio.
+    rig.app.main_screen.clips.selected = Some(crate::ui::clips::ClipRef {
+        channel: 2, lane: secondary, id: hidden_id,
+    });
+    rig.app.track_op(2, 0, crate::ui::track_menu::TrackOp::ToggleZip, 0);
     rig.frame(vec![]);
     rig.key(Key::V, CMD);
     assert!(rig.app.song.channels[1].lanes[0].clips.is_empty());
@@ -587,6 +596,7 @@ fn playlist_clip_clipboard_survives_actual_project_replacement_and_routes_to_not
     assert_eq!(pasted.len(), 1);
     assert_eq!(pasted[0].events, source.events);
     assert_eq!(pasted[0].loop_len_beats, source.loop_len_beats);
+    assert_eq!(rig.app.song.channels[2].lanes[secondary].clips[0].start_tick, 2048);
     rig.key(Key::Z, CMD);
     assert!(rig.app.song.channels[2].lanes[0].clips.is_empty());
     assert!(rig.app.song.channels[1].lanes[0].clips.is_empty());

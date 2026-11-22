@@ -7,6 +7,7 @@ on:
       - '.github/workflows/clipboard-validation.yml'
       - 'src/ui/clips.rs'
       - 'src/ui/buttons.rs'
+      - 'src/app/tracks.rs'
       - 'src/app/tests/keymap_actions.rs'
       - 'src/app/tests/rack_wiring.rs'
 jobs:
@@ -24,7 +25,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
       - name: Format and expose patch
         run: |
-          rustfmt --edition 2024 --config skip_children=true src/ui/clips.rs src/ui/buttons.rs src/app.rs src/app/tests/keymap_actions.rs src/app/tests/rack_wiring.rs src/ui/main_screen.rs
+          rustfmt --edition 2024 --config skip_children=true src/ui/clips.rs src/ui/buttons.rs src/app.rs src/app/tracks.rs src/app/tests/keymap_actions.rs src/app/tests/rack_wiring.rs src/ui/main_screen.rs
           git diff > /tmp/clipboard-format.patch
           python3 - <<'PY'
           import pathlib, base64, zlib
@@ -37,7 +38,7 @@ jobs:
           result=0
           cargo test --lib --no-run > /tmp/tests.log 2>&1 || result=$?
           if [ "$result" -eq 0 ]; then
-            for filter in ui::clips::tests ui::main_screen::tests ui::buttons::tests app::tests::keymap_actions app::tests::rack_wiring ui::piano_roll::tests ui::drum_grid::tests ui::step_seq::tests auto_save; do
+            for filter in ui::clips::tests ui::main_screen::tests ui::buttons::tests app::tests::keymap_actions app::tests::track_menu app::tests::rack_wiring ui::piano_roll::tests ui::drum_grid::tests ui::step_seq::tests auto_save; do
               cargo test --lib "$filter" >> /tmp/tests.log 2>&1 || result=$?
             done
           fi

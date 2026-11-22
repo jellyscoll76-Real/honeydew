@@ -1063,13 +1063,19 @@ impl Clips {
         };
     }
 
-    /// Clear project-local selection/gestures without losing the session clipboard.
-    pub(crate) fn project_replaced(&mut self) {
+    /// Reset transient playlist state (for example when folding its selected track).
+    pub(crate) fn clear_view(&mut self) {
         *self = Self {
             clipboard: std::mem::take(&mut self.clipboard),
-            clipboard_foreign: true,
+            clipboard_foreign: self.clipboard_foreign,
             ..Self::default()
         };
+    }
+
+    /// Clear project-local selection/gestures without losing the session clipboard.
+    pub(crate) fn project_replaced(&mut self) {
+        self.clear_view();
+        self.clipboard_foreign = true;
     }
 
     /// The keymap's editing actions while the playlist holds the keyboard (`ui/edit_keys.rs`), on the selected clip or
@@ -4337,6 +4343,8 @@ mod tests {
         assert!(state.clipboard_foreign);
         assert!(state.targets().is_empty());
         state.deselect();
+        state.clear_view();
+        assert!(state.clipboard_foreign);
         state.rekey(|_, _| None);
         state.project_replaced();
         assert_eq!(state.clipboard, snapshot);

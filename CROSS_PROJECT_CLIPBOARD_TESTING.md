@@ -16,7 +16,7 @@ Audio can overlap existing clips. Paste appends clones with fresh lane-local IDs
 
 Cross-project automation clips are deliberately skipped: module/pad IDs belong to the source project and a same-numbered destination is not proof of a compatible control binding. Same-project automation paste remains supported. Other existing editor/module clipboards and explicit module Replace operations keep their established meanings; this is not a redesign of the Modules browser.
 
-Same-project clip paste keeps its existing behavior: one clip can use the touched lane of the same kind; groups retain their original tracks. Once copied content has crossed a project replacement, it stays detached from target-project track rekeys/deletions. Deselecting and repeated pasting do not consume it.
+Same-project clip paste keeps its existing behavior: one clip can use the touched lane of the same kind; groups retain their original tracks. Once copied content has crossed a project replacement, it stays detached from target-project track rekeys/deletions. Deselecting, folding a selected secondary track and repeated pasting do not consume it.
 
 ## Lane actions
 
