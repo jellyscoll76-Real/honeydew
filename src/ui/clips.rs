@@ -4338,7 +4338,7 @@ impl FloatingRow {
                     button,
                     center,
                     d,
-                    slot,
+                    d,
                     scale,
                     flash,
                     label,
