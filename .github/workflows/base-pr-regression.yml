@@ -342,13 +342,24 @@ jobs:
           for n in 1 2 3 4 5; do
             cargo test -p banaforge --lib "$menu" -- --exact > "/tmp/menu-isolated-$n.log" 2>&1
             rc=$?
-            if [ "$rc" -ne 0 ] || ! grep -q '1 passed' "/tmp/menu-isolated-$n.log"; then
-              echo "::error title=Isolated main-menu test::attempt $n failed (exit $rc)"
-              tail -40 "/tmp/menu-isolated-$n.log"
-              isolated_fail=1
-            else
-              echo "::notice title=Isolated main-menu test::attempt $n passed"
-            fi
+            python3 - "$menu" "$n" "$rc" "/tmp/menu-isolated-$n.log" <<'PYISO'
+          import pathlib, re, sys
+          menu, attempt, rc, path = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+          text = pathlib.Path(path).read_text(errors="replace")
+          text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+          lines = text.splitlines()
+          result = next((line for line in lines if line.startswith("test result:")), "no test-result summary")
+          test = next((line for line in lines if menu in line and (" ... ok" in line or " ... FAILED" in line)), "target test line missing")
+          passed = rc == 0 and "1 passed" in result and " ... ok" in test
+          command = "notice" if passed else "error"
+          print(f"::{command} title=Isolated main-menu attempt {attempt}::exit={rc}; {result}; {test}")
+          if not passed:
+              for line in lines:
+                  if "panicked at" in line or "assertion" in line or "left:" in line or "right:" in line:
+                      print(f"::error title=Isolated failure detail::{line[:900]}")
+          sys.exit(0 if passed else 1)
+          PYISO
+            if [ "$?" -ne 0 ]; then isolated_fail=1; fi
           done
           parallel_rc=0
           cargo test -p banaforge --lib app::tests:: -- --nocapture > /tmp/app-tests-parallel.log 2>&1 || parallel_rc=$?
@@ -360,19 +371,20 @@ jobs:
           failed_target = False
           for mode, code in (("parallel", parallel_rc), ("serial", serial_rc)):
               text = pathlib.Path(f"/tmp/app-tests-{mode}.log").read_text(errors="replace")
+              text = re.sub(r"\x1b\[[0-9;]*m", "", text)
               lines = text.splitlines()
-              target = [line for line in lines if menu in line and (" ... ok" in line or " ... FAILED" in line)]
-              if any(" ... ok" in line for line in target):
-                  print(f"::notice title=Main-menu {mode} app suite::{target[-1]}")
-              elif any(" ... FAILED" in line for line in target):
-                  failed_target = True
-                  print(f"::error title=Main-menu {mode} app suite::{target[-1]}")
-                  for line in lines:
-                      if "panicked at" in line or "assertion" in line or "left:" in line or "right:" in line:
-                          print(f"::error title=Main-menu {mode} failure detail::{line[:900]}")
-              else:
-                  failed_target = True
-                  print(f"::error title=Main-menu {mode} app suite::target test was not reported")
+              result = next((line for line in lines if line.startswith("test result:")), "no test-result summary")
+              target_lines = [line for line in lines if menu in line]
+              target = next((line for line in target_lines if " ... ok" in line or " ... FAILED" in line), "target test line missing")
+              passed = " ... ok" in target
+              failed_target |= not passed
+              command = "notice" if passed else "error"
+              print(f"::{command} title=Main-menu {mode} app suite::exit={code}; {result}; {target}")
+              if not passed:
+                  for i, line in enumerate(lines):
+                      if menu in line and "FAILED" in line:
+                          for detail in lines[i:i+6]:
+                              print(f"::error title=Main-menu {mode} failure detail::{detail[:900]}")
               failures = [line for line in lines if re.search(r"^test .* \.\.\. FAILED$", line)]
               print(f"::notice title=App suite {mode}::exit={code}; failed tests={len(failures)}")
               for line in failures[:20]:
