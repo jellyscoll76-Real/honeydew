@@ -119,11 +119,43 @@ jobs:
           fi
           exit "$rc"
       - name: Run cargo check --workspace --target wasm32-unknown-unknown
+        id: wasm
         if: ${{ !cancelled() && (success() || steps.rustfmt.outcome == 'failure' || steps.clippy.outcome == 'failure' || steps.workspace_tests.outcome == 'failure') }}
-        run: cargo check --workspace --target wasm32-unknown-unknown
+        shell: bash
+        run: |
+          set +e
+          cargo check --workspace --target wasm32-unknown-unknown > /tmp/wasm.log 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'PYWASM'
+          import pathlib
+          lines = pathlib.Path("/tmp/wasm.log").read_text(errors="replace").splitlines()
+          picked = [line for line in lines if any(token in line for token in ("error", "warning", "could not compile", "failed to run"))]
+          for line in (picked or lines[-30:])[-40:]:
+              msg = line.replace("%", "%25").replace("\\r", "%0D").replace("\\n", "%0A")
+              print(f"::error title=WASM check::{msg[:900]}")
+          PYWASM
+            tail -80 /tmp/wasm.log
+          fi
+          exit "$rc"
       - name: Content tool
+        id: content_tool
         if: ${{ !cancelled() && (success() || steps.rustfmt.outcome == 'failure' || steps.clippy.outcome == 'failure' || steps.workspace_tests.outcome == 'failure') }}
-        run: cargo test --manifest-path tools/content-build/Cargo.toml
+        shell: bash
+        run: |
+          set +e
+          cargo test --manifest-path tools/content-build/Cargo.toml > /tmp/content-tool.log 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'PYCONTENT'
+          import pathlib
+          lines = pathlib.Path("/tmp/content-tool.log").read_text(errors="replace").splitlines()
+          for line in lines[-50:]:
+              msg = line.replace("%", "%25").replace("\\r", "%0D").replace("\\n", "%0A")
+              print(f"::error title=Content tool::{msg[:900]}")
+          PYCONTENT
+          fi
+          exit "$rc"
 
   native-multicore:
     strategy:

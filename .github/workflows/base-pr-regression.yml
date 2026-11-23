@@ -165,6 +165,17 @@ jobs:
           path.write_text(candidate)
           results["legacy-layout"] = run("legacy-layout")
 
+          # Use the new layout first, but reduce slot pitch to the 44-point minimum whenever it wraps;
+          # this checks whether the taller multi-row toolbar is what hides Edit on the audio row.
+          candidate = original.replace(
+              "if layout.2.y > view.grid.height() {",
+              "if layout.0 < labels.len() || layout.2.y > view.grid.height() {",
+              1,
+          )
+          assert candidate != original
+          path.write_text(candidate)
+          results["min44-single-row-fallback"] = run("min44-single-row-fallback")
+
           # Replace only FloatingRow::show with the base implementation; keep the PR's clip lookup,
           # selection and navigation dispatch code. ROW_B was renamed in the PR.
           base = subprocess.check_output(
