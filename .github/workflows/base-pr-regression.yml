@@ -255,3 +255,35 @@ jobs:
           sys.exit(rc)
           PYTESTS
           exit "$?"
+
+  current-only-floating-row-test:
+    name: Current-head FloatingRow tap test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Run the workspace-only FloatingRow failure with details
+        shell: bash
+        run: |
+          set +e
+          test='app::tests::floating_row::a_tap_on_a_clip_of_another_track_shows_the_row_over_it'
+          cargo test -p banaforge --lib "$test" -- --exact --nocapture > /tmp/floating-row-tap.log 2>&1
+          rc=$?
+          python3 - "$test" "$rc" <<'PYTAP'
+          import pathlib, sys
+          test, rc = sys.argv[1], int(sys.argv[2])
+          lines = pathlib.Path("/tmp/floating-row-tap.log").read_text(errors="replace").splitlines()
+          if rc == 0 and any("1 passed" in line for line in lines if line.startswith("test result:")):
+              print(f"::notice title=Current-head FloatingRow test::PASS: {test}")
+              sys.exit(0)
+          picked = [line for line in lines if any(token in line for token in ("FAILED", "panicked at", "assertion", "left:", "right:", "test result:", "error:"))]
+          for line in (picked or lines[-80:])[-80:]:
+              msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Current-head FloatingRow test::{msg[:900]}")
+          sys.exit(1)
+          PYTAP
