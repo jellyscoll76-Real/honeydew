@@ -37,8 +37,21 @@ jobs:
         id: fmt
         shell: bash
         run: |
-          rustc --version | tee -a "$GITHUB_STEP_SUMMARY"
-          cargo fmt --check
+          rustc --version
+          set +e
+          cargo fmt --check > /tmp/rustfmt.log 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'PYFMT'
+          import pathlib
+          text = pathlib.Path("/tmp/rustfmt.log").read_text(errors="replace")
+          text = text[-8000:] or "cargo fmt --check failed without output"
+          for start in range(0, len(text), 700):
+              msg = text[start:start+700].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Rust 1.91 formatting diff::{msg}")
+          PYFMT
+          fi
+          exit "$rc"
       - name: Compare regression tests against both SHAs
         if: ${{ always() && !cancelled() }}
         shell: bash
@@ -49,13 +62,29 @@ jobs:
             'app::tests::editor_wiring::editors::a_clips_edit_opens_the_automation_or_audio_editor_with_undo_and_preview' \
             'app::tests::editor_wiring::the_wheel_scrolls_no_piano_roll_under_the_rack_but_beside_it' \
             'app::tests::drumsets::the_drumsets_root_lists_my_files_default_and_the_four_kits'; do
-            echo "## $test" >> "$GITHUB_STEP_SUMMARY"
-            if cargo test --workspace "$test" -- --exact --nocapture; then
-              echo 'PASS' >> "$GITHUB_STEP_SUMMARY"
-            else
-              rc=$?
-              echo "FAIL (exit $rc)" >> "$GITHUB_STEP_SUMMARY"
-              failed=1
-            fi
+            safe=$(printf '%s' "$test" | tr ':' '_')
+            log="/tmp/${safe}.log"
+            cargo test --workspace "$test" -- --exact --nocapture > "$log" 2>&1
+            rc=$?
+            python3 - "$test" "$log" "$rc" <<'PYTEST'
+          import pathlib, re, sys
+          test, path, rc = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          lines = pathlib.Path(path).read_text(errors="replace").splitlines()
+          if rc == 0:
+              matches = [line for line in lines if line.startswith("test result:") or re.search(rf"test {re.escape(test)} \.\.\. ok", line)]
+              if not any("1 passed" in line or "... ok" in line for line in matches):
+                  print(f"::error title={test}::cargo exited 0 but did not confirm exactly one test ran")
+                  sys.exit(1)
+              print(f"::notice title={test}::PASS: " + " | ".join(matches[-2:]))
+          else:
+              picked = [line for line in lines if any(token in line for token in ("FAILED", "panicked at", "assertion", "left:", "right:", "error:", "test result:"))]
+              if not picked:
+                  picked = lines[-20:]
+              for line in picked[-30:]:
+                  msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print(f"::error title={test}::{msg[:900]}")
+              sys.exit(1)
+          PYTEST
+            if [ "$?" -ne 0 ]; then failed=1; fi
           done
           exit "$failed"
