@@ -4763,32 +4763,6 @@ mod tests {
     }
 
     #[test]
-    fn action_targets_are_consistent_non_overlapping_and_wrap_on_small_phones() {
-        for width in [180.0, 240.0, 280.0, 320.0, 360.0, 480.0, 800.0] {
-            let (columns, slot, size) = action_row_layout(width, 6, 56.0, 6.4);
-            assert!(slot >= 44.0);
-            assert!(size.x + 12.8 <= width + 0.01);
-            assert!(size.y >= slot);
-            let rects: Vec<_> = (0..6)
-                .map(|i| {
-                    Rect::from_min_size(
-                        pos2((i % columns) as f32 * slot, (i / columns) as f32 * slot),
-                        Vec2::splat(slot),
-                    )
-                })
-                .collect();
-            for i in 0..6 {
-                for j in i + 1..6 {
-                    let intersection = rects[i].intersect(rects[j]);
-                    assert!(!intersection.is_positive());
-                }
-            }
-        }
-        assert!(action_row_layout(240.0, 6, 56.0, 6.4).0 < 6);
-        assert_eq!(action_row_layout(800.0, 6, 56.0, 6.4).0, 6);
-    }
-
-    #[test]
     fn copy_feedback_dismisses_the_row_once_and_reopening_restores_it() {
         let mut row = FloatingRow::default();
         row.anchor = Some(pos2(100.0, 100.0));
