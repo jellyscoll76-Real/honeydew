@@ -2717,17 +2717,16 @@ impl PianoRoll {
         let events = preview.unwrap_or_else(|| self.clip(song).map_or(&[][..], |c| &c.events));
         // The stable event snapshot has the same sorted-start/prefix-end index as
         // the note grid. Preview edits can be unsorted, so keep their full scan.
-        let visible = if events == self.seen.as_slice()
-            && self.note_end_prefix.len() == events.len()
-        {
-            let left = g.tick(values.left() - 5.0 * px);
-            let right = g.tick(values.right() + px);
-            let end = events.partition_point(|event| f64::from(event.pos()) <= right);
-            let start = self.note_end_prefix.partition_point(|end| *end < left);
-            start.min(end)..end
-        } else {
-            0..events.len()
-        };
+        let visible =
+            if events == self.seen.as_slice() && self.note_end_prefix.len() == events.len() {
+                let left = g.tick(values.left() - 5.0 * px);
+                let right = g.tick(values.right() + px);
+                let end = events.partition_point(|event| f64::from(event.pos()) <= right);
+                let start = self.note_end_prefix.partition_point(|end| *end < left);
+                start.min(end)..end
+            } else {
+                0..events.len()
+            };
         for pass in [false, true] {
             for (e, _) in events[visible.clone()]
                 .iter()

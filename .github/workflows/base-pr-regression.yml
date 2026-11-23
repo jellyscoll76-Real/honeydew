@@ -48,8 +48,8 @@ jobs:
           import pathlib
           text = pathlib.Path("/tmp/rustfmt.log").read_text(errors="replace")
           text = text[-8000:] or "cargo fmt --check failed without output"
-          for start in range(0, len(text), 700):
-              msg = text[start:start+700].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for start in range(0, len(text), 900):
+              msg = text[start:start+900].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
               print(f"::error title=Rust 1.91 formatting diff::{msg}")
           PYFMT
           fi
@@ -148,7 +148,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          cargo clippy --workspace --all-targets --message-format=json > /tmp/clippy.json 2>/tmp/clippy.log
+          cargo clippy --workspace --all-targets --message-format=json -- -D warnings > /tmp/clippy.json 2>/tmp/clippy.log
           rc=$?
           python3 - <<'PYCLIPPY'
           import json, pathlib
@@ -256,18 +256,26 @@ jobs:
           PYTESTS
           exit "$?"
 
-  current-only-floating-row-test:
-    name: Current-head FloatingRow tap test
+  floating-row-tap-base-pr:
+    name: FloatingRow tap (${{ matrix.label }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: pr-9224737
+            sha: 9224737b48de1f073773cd70dc5085b29de5b3b0
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ matrix.sha }}
       - uses: dtolnay/rust-toolchain@1.91.0
       - uses: Swatinem/rust-cache@v2
       - name: System libraries
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
-      - name: Run the workspace-only FloatingRow failure with details
+      - name: Run exact FloatingRow tap test with panic context
         shell: bash
         run: |
           set +e
@@ -279,11 +287,14 @@ jobs:
           test, rc = sys.argv[1], int(sys.argv[2])
           lines = pathlib.Path("/tmp/floating-row-tap.log").read_text(errors="replace").splitlines()
           if rc == 0 and any("1 passed" in line for line in lines if line.startswith("test result:")):
-              print(f"::notice title=Current-head FloatingRow test::PASS: {test}")
+              print(f"::notice title=FloatingRow tap::{test} passed")
               sys.exit(0)
-          picked = [line for line in lines if any(token in line for token in ("FAILED", "panicked at", "assertion", "left:", "right:", "test result:", "error:"))]
-          for line in (picked or lines[-80:])[-80:]:
+          picked = []
+          for i, line in enumerate(lines):
+              if any(token in line for token in ("FAILED", "panicked at", "assertion", "left:", "right:", "track ", "test result:", "error:")):
+                  picked.extend(lines[i:i+5] if "panicked at" in line else [line])
+          for line in dict.fromkeys(picked or lines[-80:]):
               msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-              print(f"::error title=Current-head FloatingRow test::{msg[:900]}")
+              print(f"::error title=FloatingRow tap::{msg[:900]}")
           sys.exit(1)
           PYTAP
