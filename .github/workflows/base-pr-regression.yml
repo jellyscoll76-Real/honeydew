@@ -269,8 +269,14 @@ jobs:
           - label: pr-current-head cross-track tap
             sha: ${{ github.event.pull_request.head.sha || github.sha }}
             test: app::tests::floating_row::a_tap_on_a_clip_of_another_track_shows_the_row_over_it
+          - label: base-05bdebb cross-track tap
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+            test: app::tests::floating_row::a_tap_on_a_clip_of_another_track_shows_the_row_over_it
           - label: pr-9224737 right-edge
             sha: 9224737b48de1f073773cd70dc5085b29de5b3b0
+            test: app::tests::floating_row::the_playlists_row_waits_at_the_grids_right_edge_while_the_selected_copy_is_past_it
+          - label: base-05bdebb right-edge
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
             test: app::tests::floating_row::the_playlists_row_waits_at_the_grids_right_edge_while_the_selected_copy_is_past_it
           - label: pr-current-head right-edge
             sha: ${{ github.event.pull_request.head.sha || github.sha }}
