@@ -246,12 +246,12 @@ const fn row(label: &'static str, kind: Kind) -> Row {
 
 // Explicit platform inputs let host tests exercise mobile filtering too.
 fn platform_row_visible(r: &Row, desktop: bool, web: bool) -> bool {
-    !(web && matches!(r.label, "Auto-Save" | "Auto-Save interval:"))
-        && !(web
-            && matches!(
+    !(web
+        && (matches!(r.label, "Auto-Save" | "Auto-Save interval:")
+            || matches!(
                 r.kind,
                 Kind::Dropdown(Choice::SampleMemory) | Kind::AudioInput
-            ))
+            )))
         && (desktop
             || (!matches!(r.kind, Kind::InstallSounds | Kind::BufferSize)
                 && !matches!(

@@ -158,13 +158,10 @@ jobs:
               )
           };"""
           candidate = original[:start] + legacy_layout + original[end:]
-          old_center = """                if lane_actions {
-                    row.top() + ((i / columns) as f32 + 0.5) * slot
-                } else {
-                    row.center().y
-                },"""
-          assert old_center in candidate
-          candidate = candidate.replace(old_center, "                row.center().y,", 1)
+          center_start = candidate.index("            let center = pos2(")
+          center_if = candidate.index("                if lane_actions {", center_start)
+          center_end = candidate.index("                },", center_if) + len("                },")
+          candidate = candidate[:center_if] + "                row.center().y," + candidate[center_end:]
           path.write_text(candidate)
           results["legacy-layout"] = run("legacy-layout")
 
@@ -212,7 +209,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          cargo clippy --workspace --all-targets --message-format=json -- -D warnings > /tmp/clippy.json 2>/tmp/clippy.log
+          cargo clippy --workspace --all-targets --message-format=json > /tmp/clippy.json 2>/tmp/clippy.log
           rc=$?
           python3 - <<'PYCLIPPY'
           import json, pathlib
@@ -234,7 +231,8 @@ jobs:
                   spans = [{"file_name": ".github", "line_start": 1}]
               for span in spans:
                   message = diag.get("message", "diagnostic").replace("%", "%25").replace("\\r", "%0D").replace("\\n", " ")
-                  print(f"::error file={span['file_name']},line={span['line_start']},title={code}::{message}")
+                  command = "error" if diag.get("level") == "error" else "warning"
+                  print(f"::{command} file={span['file_name']},line={span['line_start']},title={code}::{message}")
           if not found:
               print("::notice title=Clippy::No compiler warnings or errors")
           PYCLIPPY

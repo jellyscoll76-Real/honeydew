@@ -157,10 +157,10 @@ impl BanaForgeApp {
                     (self.project_autosave.timer.due - 5.0 - now).max(0.25) as f32,
                 );
             }
-            if let Some((_, since)) = &self.project_autosave.status {
-                if now - since < 4.0 {
-                    ctx.request_repaint_after_secs((4.0 - now + since).max(0.01) as f32);
-                }
+            if let Some((_, since)) = &self.project_autosave.status
+                && now - since < 4.0
+            {
+                ctx.request_repaint_after_secs((4.0 - now + since).max(0.01) as f32);
             }
         }
         #[cfg(target_arch = "wasm32")]
