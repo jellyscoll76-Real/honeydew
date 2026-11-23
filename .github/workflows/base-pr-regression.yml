@@ -64,7 +64,8 @@ jobs:
             'app::tests::editor_wiring::editors::a_clips_edit_opens_the_automation_or_audio_editor_with_undo_and_preview' \
             'app::tests::editor_wiring::the_wheel_scrolls_no_piano_roll_under_the_rack_but_beside_it' \
             'app::tests::drumsets::the_drumsets_root_lists_my_files_default_and_the_four_kits' \
-            'app::tests::the_logo_opens_the_main_menu_whose_tabs_switch_and_whose_close_x_closes_it'; do
+            'app::tests::the_logo_opens_the_main_menu_whose_tabs_switch_and_whose_close_x_closes_it' \\
+            'ui::main_screen::tests::a_shown_rows_circles_pop_in'; do
             safe=$(printf '%s' "$test" | tr ':' '_')
             log="/tmp/${safe}.log"
             cargo test -p banaforge --lib "$test" -- --exact --nocapture > "$log" 2>&1
