@@ -4280,7 +4280,7 @@ impl FloatingRow {
         let (columns, slot, size) = if lane_actions {
             let layout = action_row_layout(view.grid.width(), labels.len(), m.u(1.75), m.u(ROW_M));
             if layout.0 < labels.len()
-                || layout.2.y + 2.0 * m.u(ROW_M) > view.grid.height()
+                || layout.2.y + 2.0 * m.u(ROW_M) > view.map[3]
             {
                 (
                     labels.len().max(1),
