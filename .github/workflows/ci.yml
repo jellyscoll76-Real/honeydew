@@ -29,6 +29,7 @@ jobs:
       - name: Cross-platform branding contracts
         run: python3 -m unittest discover -s tests/branding -v
       - name: Run cargo fmt --check
+        id: rustfmt
         shell: bash
         run: |
           set +e
@@ -62,6 +63,8 @@ jobs:
           fi
           exit "$rc"
       - name: Run cargo clippy --workspace --all-targets -- -D warnings
+        id: clippy
+        if: ${{ success() || steps.rustfmt.outcome == 'failure' }}
         shell: bash
         run: |
           set +e
@@ -94,6 +97,7 @@ jobs:
           fi
           exit "$rc"
       - name: Run cargo test --workspace
+        if: ${{ success() || steps.rustfmt.outcome == 'failure' || steps.clippy.outcome == 'failure' }}
         shell: bash
         run: |
           set +e

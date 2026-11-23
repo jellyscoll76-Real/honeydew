@@ -50,8 +50,14 @@ for r in rows:
     if r['phase'] == 'full_app_cpu':
         lines.append(f"| {r['case']} | {r['hits']} | {r['clips']} | {r['view']} | {r['mode']} | {r['ui_p50_ms']:.3f} | {r['ui_p95_ms']:.3f} | {r['ui_p99_ms']:.3f} | {r['tess_p50_ms']:.3f} | {r['tess_p95_ms']:.3f} | {r['wave_cache_hits']} | {r['wave_cache_misses']} | {r['wave_cache_evictions']} |")
 lines += ['', 'For all-selected modes, `all_selected_indexed` is a test-only full-frame candidate HashSet path; it builds the set each frame. The additional `indexed_paint_tess` pass builds a per-lane ID->position HashMap, resolves and paints the same visible clips, then tessellates; map build and allocation are included. Compare against baseline paint+tessellate at identical fixture/view; this is still a helper pass, not a full-app indexed renderer. Equal shape/vertex counts and per-ID assertions are checked, not pixel/GPU equivalence.', '',
-
-          '## Scripted full-app interactions (milliseconds per complete synthetic event sequence)', '',
+          '## Dedicated full-frame paint lookup A/B (milliseconds per complete headless frame)', '',
+          'These measurements are from `high_clip_count_paint_lookup_ab`, not helper timings. Each row includes the full app frame plus egui tessellation, after six warmup frames and over 30 measured frames. They are Linux/headless with a fake audio sink; not Android FPS, GPU timing, physical-touch latency, or hardware playback.', '',
+          '| View | Lookup | Clips | Visible clips | Frames | Full-frame p50 ms | Full-frame p95 ms | Shapes | Shape-count equivalence |',
+          '|---|---|---:|---:|---:|---:|---:|---:|---|']
+for r in rows:
+    if r['phase'] == 'full_app_paint_lookup_ab':
+        lines.append(f"| {r['view']} | {r['lookup']} | {r['clips']} | {r['visible_clips']} | {r['frames']} | {r['full_frame_p50_ms']:.4f} | {r['full_frame_p95_ms']:.4f} | {r['shape_count']} | {'yes' if r['shape_count_only_equivalence'] else 'no'} |")
+lines += ['', '## Scripted full-app interactions (milliseconds per complete synthetic event sequence)', '',
           'Five repeats each at 4096 clips; sequence timing includes egui app frames and rig input dispatch. This is Linux desktop/headless diagnostic timing, not physical touch latency or Android performance.', '',
           '| Case | Clips | Action | Median | Five totals (ms) | Effect each repeat | Resize diagnostic |', '|---|---:|---|---:|---|---|---|']
 for r in rows:
@@ -80,7 +86,7 @@ lines += ['', 'These are isolated Linux/release microbenchmarks, not complete pr
 (destination / 'REPORT.md').write_text('\n'.join(lines) + '\n')
 
 # Compact medians for the annotation channel (full data.json stays in the artifact).
-summary = {'ui_attribution': {}, 'full_app_cpu': {}, 'offline_audio': [], 'cold_assets': [], 'resize_hit_test_diagnostic': [], 'index_maintenance': []}
+summary = {'ui_attribution': {}, 'full_app_cpu': {}, 'full_app_paint_lookup_ab': [], 'offline_audio': [], 'cold_assets': [], 'resize_hit_test_diagnostic': [], 'index_maintenance': []}
 for (case, hits, view, motion), group in groups.items():
     med = lambda key: round(statistics.median(r[key] for r in group), 4)
     summary['ui_attribution'][f'{case}|{hits}|{view}|{motion}'] = {
@@ -109,6 +115,11 @@ for r in rows:
             'wave_cache_inserts': r['wave_cache_inserts'], 'wave_cache_evictions': r['wave_cache_evictions'],
             'wave_cache_expired': r['wave_cache_expired'], 'wave_cache_bypasses': r['wave_cache_bypasses'],
             'wave_cache_entries': r['wave_cache_entries'], 'wave_cache_bytes': r['wave_cache_bytes']}
+    elif r['phase'] == 'full_app_paint_lookup_ab':
+        summary['full_app_paint_lookup_ab'].append({k: r[k] for k in (
+            'view', 'clips', 'visible_clips', 'lookup', 'frames', 'full_frame_p50_ms',
+            'full_frame_p95_ms', 'shape_count', 'shape_count_only_equivalence',
+            'fake_audio_sink', 'hardware_xruns', 'gpu_fps')})
     elif r['phase'] == 'scripted_interaction':
         summary.setdefault('scripted_interaction', []).append({k: (round(v, 4) if isinstance(v, float) else v)
             for k, v in r.items() if k != 'phase'})
