@@ -291,8 +291,7 @@ mod tests {
             times.sort_by(f64::total_cmp);
             println!(
                 "PROFILE labels chars={size} median_ms={:.6} p95_ms={:.6}",
-                times[20],
-                times[38]
+                times[20], times[38]
             );
         }
     }
