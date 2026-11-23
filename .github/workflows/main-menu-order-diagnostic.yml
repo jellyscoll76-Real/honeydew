@@ -1,0 +1,80 @@
+name: Main-menu test-order diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  app-test-order:
+    name: App tests (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-current-head
+            sha: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Repeat isolated test and compare app-suite execution modes
+        shell: bash
+        run: |
+          set +e
+          menu='app::tests::the_logo_opens_the_main_menu_whose_tabs_switch_and_whose_close_x_closes_it'
+          isolated_fail=0
+          for n in 1 2 3 4 5; do
+            cargo test -p banaforge --lib "$menu" -- --exact > "/tmp/menu-isolated-$n.log" 2>&1
+            rc=$?
+            if [ "$rc" -ne 0 ] || ! grep -q '1 passed' "/tmp/menu-isolated-$n.log"; then
+              echo "::error title=Isolated main-menu test::attempt $n failed (exit $rc)"
+              tail -40 "/tmp/menu-isolated-$n.log"
+              isolated_fail=1
+            else
+              echo "::notice title=Isolated main-menu test::attempt $n passed"
+            fi
+          done
+          parallel_rc=0
+          cargo test -p banaforge --lib app::tests:: -- --nocapture > /tmp/app-tests-parallel.log 2>&1 || parallel_rc=$?
+          serial_rc=0
+          cargo test -p banaforge --lib app::tests:: -- --test-threads=1 --nocapture > /tmp/app-tests-serial.log 2>&1 || serial_rc=$?
+          python3 - "$menu" "$parallel_rc" "$serial_rc" <<'PY'
+          import pathlib, re, sys
+          menu, parallel_rc, serial_rc = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+          failed_target = False
+          for mode, code in (("parallel", parallel_rc), ("serial", serial_rc)):
+              text = pathlib.Path(f"/tmp/app-tests-{mode}.log").read_text(errors="replace")
+              lines = text.splitlines()
+              target = [line for line in lines if menu in line and (" ... ok" in line or " ... FAILED" in line)]
+              if any(" ... ok" in line for line in target):
+                  print(f"::notice title=Main-menu {mode} app suite::{target[-1]}")
+              elif any(" ... FAILED" in line for line in target):
+                  failed_target = True
+                  print(f"::error title=Main-menu {mode} app suite::{target[-1]}")
+                  for line in lines:
+                      if "panicked at" in line or "assertion" in line or "left:" in line or "right:" in line:
+                          print(f"::error title=Main-menu {mode} failure detail::{line[:900]}")
+              else:
+                  failed_target = True
+                  print(f"::error title=Main-menu {mode} app suite::target test was not reported")
+              failures = [line for line in lines if re.search(r"^test .* \.\.\. FAILED$", line)]
+              print(f"::notice title=App suite {mode}::exit={code}; failed tests={len(failures)}")
+              for line in failures[:20]:
+                  print(f"::warning title=App suite {mode} failure::{line[:900]}")
+          sys.exit(1 if failed_target else 0)
+          PY
+          python_rc=$?
+          if [ "$isolated_fail" -ne 0 ]; then exit 1; fi
+          exit "$python_rc"
