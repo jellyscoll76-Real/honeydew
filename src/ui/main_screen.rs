@@ -4716,12 +4716,12 @@ mod tests {
         let first = radii(&shown);
         assert_eq!(first.len(), 6, "{first:?}");
         assert!(first.iter().all(|&r| r < 1.0), "{first:?}");
-        // 0.1 s on (6 frames at 60 Hz): past full size; then radius 24 points (diameter 1.5 U).
+        // 0.1 s on (6 frames at 60 Hz): past full size; then radius 22.4 points (diameter 1.4 U).
         let next = radii(&rig.frame(vec![]));
-        assert!(next.iter().all(|&r| r > 24.0), "{next:?}");
+        assert!(next.iter().all(|&r| r > 22.4), "{next:?}");
         let settled = radii(&rig.frame(vec![]));
         assert!(
-            settled.iter().all(|&r| (r - 24.0).abs() < 1e-3),
+            settled.iter().all(|&r| (r - 22.4).abs() < 1e-3),
             "{settled:?}"
         );
     }
