@@ -4279,7 +4279,9 @@ impl FloatingRow {
         let lane_actions = id == "clip_button";
         let (columns, slot, size) = if lane_actions {
             let layout = action_row_layout(view.grid.width(), labels.len(), m.u(1.75), m.u(ROW_M));
-            if layout.2.y > view.grid.height() {
+            if layout.0 < labels.len()
+                || layout.2.y + 2.0 * m.u(ROW_M) > view.grid.height()
+            {
                 (
                     labels.len().max(1),
                     m.u(ROW_SLOT),

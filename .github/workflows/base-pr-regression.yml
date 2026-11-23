@@ -256,17 +256,25 @@ jobs:
           PYTESTS
           exit "$?"
 
-  floating-row-tap-base-pr:
-    name: FloatingRow tap (${{ matrix.label }})
+  floating-row-behavior-base-pr:
+    name: FloatingRow behavior (${{ matrix.label }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: pr-9224737
+          - label: pr-9224737 cross-track tap
             sha: 9224737b48de1f073773cd70dc5085b29de5b3b0
-          - label: pr-current-head
+            test: app::tests::floating_row::a_tap_on_a_clip_of_another_track_shows_the_row_over_it
+          - label: pr-current-head cross-track tap
             sha: ${{ github.event.pull_request.head.sha || github.sha }}
+            test: app::tests::floating_row::a_tap_on_a_clip_of_another_track_shows_the_row_over_it
+          - label: pr-9224737 right-edge
+            sha: 9224737b48de1f073773cd70dc5085b29de5b3b0
+            test: app::tests::floating_row::the_playlists_row_waits_at_the_grids_right_edge_while_the_selected_copy_is_past_it
+          - label: pr-current-head right-edge
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+            test: app::tests::floating_row::the_playlists_row_waits_at_the_grids_right_edge_while_the_selected_copy_is_past_it
     steps:
       - uses: actions/checkout@v4
         with:
@@ -275,19 +283,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: System libraries
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
-      - name: Run exact FloatingRow tap test with panic context
+      - name: Run exact FloatingRow behavior test with panic context
         shell: bash
         run: |
           set +e
-          test='app::tests::floating_row::a_tap_on_a_clip_of_another_track_shows_the_row_over_it'
-          cargo test -p banaforge --lib "$test" -- --exact --nocapture > /tmp/floating-row-tap.log 2>&1
+          test='${{ matrix.test }}'
+          cargo test -p banaforge --lib "$test" -- --exact --nocapture > /tmp/floating-row-behavior.log 2>&1
           rc=$?
           python3 - "$test" "$rc" <<'PYTAP'
           import pathlib, sys
           test, rc = sys.argv[1], int(sys.argv[2])
-          lines = pathlib.Path("/tmp/floating-row-tap.log").read_text(errors="replace").splitlines()
+          lines = pathlib.Path("/tmp/floating-row-behavior.log").read_text(errors="replace").splitlines()
           if rc == 0 and any("1 passed" in line for line in lines if line.startswith("test result:")):
-              print(f"::notice title=FloatingRow tap::{test} passed")
+              print(f"::notice title=FloatingRow behavior::{test} passed")
               sys.exit(0)
           picked = []
           for i, line in enumerate(lines):
@@ -295,6 +303,6 @@ jobs:
                   picked.extend(lines[i:i+5] if "panicked at" in line else [line])
           for line in dict.fromkeys(picked or lines[-80:]):
               msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-              print(f"::error title=FloatingRow tap::{msg[:900]}")
+              print(f"::error title=FloatingRow behavior::{msg[:900]}")
           sys.exit(1)
           PYTAP
