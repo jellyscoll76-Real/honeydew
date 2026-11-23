@@ -129,7 +129,7 @@ jobs:
                   if not picked:
                       picked = lines[-20:]
                   for line in picked[-20:]:
-                      msg = line.replace("%", "%25").replace("\\r", "%0D").replace("\\n", "%0A")
+                      msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
                       print(f"::warning title=FloatingRow {label}::{msg[:900]}")
               return passed
 
@@ -186,3 +186,57 @@ jobs:
           path.write_text(original)
           print("::notice title=FloatingRow isolation summary::" + ", ".join(f"{k}={'PASS' if v else 'FAIL'}" for k, v in results.items()))
           PY
+
+  clippy-base-pr:
+    name: Clippy (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-e8ac013
+            sha: e8ac0138774700f7215e456a6c3b5accf7c6fe93
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Run exact workspace Clippy and report diagnostics
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets --message-format=json -- -D warnings > /tmp/clippy.json 2>/tmp/clippy.log
+          rc=$?
+          python3 - <<'PYCLIPPY'
+          import json, pathlib
+          found = False
+          for line in pathlib.Path("/tmp/clippy.json").read_text(errors="replace").splitlines():
+              try:
+                  item = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if item.get("reason") != "compiler-message":
+                  continue
+              diag = item.get("message", {})
+              if diag.get("level") not in ("warning", "error"):
+                  continue
+              found = True
+              code = (diag.get("code") or {}).get("code", "rustc")
+              spans = [span for span in diag.get("spans", []) if span.get("is_primary")]
+              if not spans:
+                  spans = [{"file_name": ".github", "line_start": 1}]
+              for span in spans:
+                  message = diag.get("message", "diagnostic").replace("%", "%25").replace("\\r", "%0D").replace("\\n", " ")
+                  print(f"::error file={span['file_name']},line={span['line_start']},title={code}::{message}")
+          if not found:
+              print("::notice title=Clippy::No compiler warnings or errors")
+          PYCLIPPY
+          cat /tmp/clippy.log
+          exit "$rc"
