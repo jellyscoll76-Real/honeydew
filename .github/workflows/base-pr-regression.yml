@@ -1,0 +1,61 @@
+name: Base versus PR regressions
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  compare:
+    name: targeted tests (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-9224737
+            sha: 9224737b48de1f073773cd70dc5085b29de5b3b0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Record exact Rust and formatting result
+        id: fmt
+        shell: bash
+        run: |
+          rustc --version | tee -a "$GITHUB_STEP_SUMMARY"
+          cargo fmt --check
+      - name: Compare regression tests against both SHAs
+        if: ${{ always() && !cancelled() }}
+        shell: bash
+        run: |
+          set +e
+          failed=0
+          for test in \
+            'app::tests::editor_wiring::editors::a_clips_edit_opens_the_automation_or_audio_editor_with_undo_and_preview' \
+            'app::tests::editor_wiring::the_wheel_scrolls_no_piano_roll_under_the_rack_but_beside_it' \
+            'app::tests::drumsets::the_drumsets_root_lists_my_files_default_and_the_four_kits'; do
+            echo "## $test" >> "$GITHUB_STEP_SUMMARY"
+            if cargo test --workspace "$test" -- --exact --nocapture; then
+              echo 'PASS' >> "$GITHUB_STEP_SUMMARY"
+            else
+              rc=$?
+              echo "FAIL (exit $rc)" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+          done
+          exit "$failed"
