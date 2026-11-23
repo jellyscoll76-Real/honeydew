@@ -28,19 +28,19 @@
 //!   and keeps it at the lift; dragging on makes it a marquee instead, and hides the menu. A right click on empty track
 //!   space shows the menu there too.
 
-mod envelopes;
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) mod count_profile;
+mod envelopes;
 
 use banaforge_audio::drums::SPEED;
 use banaforge_audio::sample_edit::speed_ratio;
 use banaforge_audio::slicer;
-#[cfg(test)]
-use std::collections::HashSet;
 use eframe::egui::{
     self, Align2, Color32, FontId, Id, Mesh, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
     pos2, vec2,
 };
+#[cfg(test)]
+use std::collections::HashSet;
 
 use crate::app::note_record;
 use crate::metrics::{FontSize, Metrics};
@@ -266,6 +266,7 @@ impl ClipRef {
 #[cfg(test)]
 thread_local! {
     static PROFILE_INDEXED_RETENTION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PROFILE_LINEAR_PAINT_LOOKUP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Run one headless frame with the candidate per-frame selection index; test-only, never used by the application.
@@ -279,19 +280,33 @@ pub(crate) fn with_profile_indexed_retention<R>(enabled: bool, f: impl FnOnce() 
     })
 }
 
+/// Switch only the test harness back to the pre-optimization linear clip lookup for a full-frame A/B.
+#[cfg(test)]
+pub(crate) fn with_profile_linear_paint_lookup<R>(enabled: bool, f: impl FnOnce() -> R) -> R {
+    PROFILE_LINEAR_PAINT_LOOKUP.with(|mode| {
+        let old = mode.replace(enabled);
+        let result = f();
+        mode.set(old);
+        result
+    })
+}
+
 #[cfg(test)]
 fn profile_live_clip_refs(song: &Song) -> HashSet<ClipRef> {
     song.channels
         .iter()
         .enumerate()
         .flat_map(|(channel, ch)| {
-            ch.lanes.iter().enumerate().flat_map(move |(lane, lane_data)| {
-                lane_data.clips.iter().map(move |clip| ClipRef {
-                    channel,
-                    lane,
-                    id: clip.id,
+            ch.lanes
+                .iter()
+                .enumerate()
+                .flat_map(move |(lane, lane_data)| {
+                    lane_data.clips.iter().map(move |clip| ClipRef {
+                        channel,
+                        lane,
+                        id: clip.id,
+                    })
                 })
-            })
         })
         .collect()
 }
@@ -641,8 +656,9 @@ impl Clips {
             }
         }
 
-        // The clips, the selected one last: on top, and first to take the pointer.
-        let mut blocks: Vec<(ClipRef, Rect)> = rows
+        // Keep each clip's source lane position for the paint pass; identity validation below falls back safely if a
+        // lane changes before then. Sorting the visible refs does not change those positions.
+        let mut blocks: Vec<(ClipRef, Rect, usize)> = rows
             .iter()
             .flat_map(|&(channel, lane, row)| {
                 let clips = app
@@ -650,18 +666,20 @@ impl Clips {
                     .channels
                     .get(channel)
                     .and_then(|c| c.lanes.get(lane));
-                clips.into_iter().flat_map(|l| &l.clips).map(move |clip| {
-                    let r = ClipRef {
-                        channel,
-                        lane,
-                        id: clip.id,
-                    };
-                    (r, clip_rect(clip, row, axis))
+                clips.into_iter().flat_map(|l| {
+                    l.clips.iter().enumerate().map(move |(position, clip)| {
+                        let r = ClipRef {
+                            channel,
+                            lane,
+                            id: clip.id,
+                        };
+                        (r, clip_rect(clip, row, axis), position)
+                    })
                 })
             })
-            .filter(|(_, rect)| rect.intersects(grid))
+            .filter(|(_, rect, _)| rect.intersects(grid))
             .collect();
-        blocks.sort_by_key(|&(r, _)| Some(r) == self.selected);
+        blocks.sort_by_key(|&(r, _, _)| Some(r) == self.selected);
         if (!self.row.owns_pointer(pos) || self.envelopes.busy())
             && self
                 .envelopes
@@ -685,13 +703,44 @@ impl Clips {
                 )
             });
         let current = self.current_clip(app);
+        let selection = selection_box(app.song, &self.targets(), rows, axis, 1.0 / m.ppp(), show);
+        let sbox = selection.filter(|_| self.marquee.is_none());
+        let scale = self
+            .selected
+            .filter(|_| self.group.is_empty())
+            .and_then(|r| {
+                Some((
+                    app.song.channels.get(r.channel)?.lanes.get(r.lane)?,
+                    find(app.song, r)?,
+                ))
+            })
+            .is_some_and(|(lane, clip)| scalable(lane, clip));
+        let shown_box = sbox.filter(|_| !self.quiet);
+        // Keep resize hit regions out of clip-body interactions, so close-spaced neighboring clips cannot consume a
+        // touch intended for a handle. Handle responses still run below and receive the press.
+        let handle_zones: Vec<Rect> = shown_box.map_or_else(Vec::new, |b| {
+            handle_rects(b, scale, m)
+                .into_iter()
+                .map(|(part, rect)| handle_zone(part, rect, b, m).intersect(grid))
+                .collect()
+        });
         // The current clip's outline goes over every row and clip, after them all ([`paint_outline`]).
         let mut outline = None;
-        for &(r, rect) in &blocks {
+        for &(r, rect, position) in &blocks {
             // A clip being recorded shows only as its take's live bar (with its notes live: [`paint_live`]).
             let live =
                 |t: &LiveTake| (t.channel, t.lane, t.clip) == (r.channel, r.lane, Some(r.id));
-            if let Some(clip) = find(app.song, r).filter(|_| !takes.iter().any(live)) {
+            #[cfg(test)]
+            let clip = PROFILE_LINEAR_PAINT_LOOKUP.with(|mode| {
+                if mode.get() {
+                    find(app.song, r)
+                } else {
+                    find_at(app.song, r, position)
+                }
+            });
+            #[cfg(not(test))]
+            let clip = find_at(app.song, r, position);
+            if let Some(clip) = clip.filter(|_| !takes.iter().any(live)) {
                 let silent =
                     preview.is_some_and(|k| (k.channel, k.lane, k.id) != (r.channel, r.lane, r.id));
                 let wave = audio_wave(&mut app.audio.samples, app.files, clip, tempo);
@@ -737,13 +786,15 @@ impl Clips {
                     lifted.rect_stroke(clip_box(rect, m), m.u(CORNER), stroke, StrokeKind::Inside);
                 }
             }
-            let response = ui.interact(
-                rect.intersect(grid),
-                Id::new(("clip", r.channel, r.lane, r.id)),
-                Sense::click_and_drag(),
-            );
-            if pressed && response.is_pointer_button_down_on() {
-                landed = Some(Target::Clip(r, Part::Body));
+            if !pos.is_some_and(|p| handle_zones.iter().any(|zone| zone.contains(p))) {
+                let response = ui.interact(
+                    rect.intersect(grid),
+                    Id::new(("clip", r.channel, r.lane, r.id)),
+                    Sense::click_and_drag(),
+                );
+                if pressed && response.is_pointer_button_down_on() {
+                    landed = Some(Target::Clip(r, Part::Body));
+                }
             }
         }
 
@@ -787,8 +838,6 @@ impl Clips {
         // The selection overlay: one pulsing `text` box over every selected clip, gaps included, no outline. While a
         // marquee is live it is the only box drawn: the selection shows on its release; its frame still takes touches
         // and places the floating row.
-        let selection = selection_box(app.song, &self.targets(), rows, axis, 1.0 / m.ppp(), show);
-        let sbox = selection.filter(|_| self.marquee.is_none());
         paint_pulse(&painter, &app.cx, sbox, m.u(CORNER), &mut self.pulse);
         // A touch-down in the group's frame acts on the group whole; in a quiet group's, only one on its clips.
         let frame = selection.filter(|_| !self.group.is_empty());
@@ -805,18 +854,9 @@ impl Clips {
                 Part::Body,
             ));
         }
-        let scale = (self.selected.filter(|_| self.group.is_empty()))
-            .and_then(|r| {
-                Some((
-                    app.song.channels.get(r.channel)?.lanes.get(r.lane)?,
-                    find(app.song, r)?,
-                ))
-            })
-            .is_some_and(|(lane, clip)| scalable(lane, clip));
         // The handles pop in from the frame they show.
         self.shown = (sbox.is_some() && !body).then(|| self.shown.unwrap_or(now));
         let mut handles = Vec::new();
-        let shown_box = sbox.filter(|_| !self.quiet);
         for (part, rect) in shown_box.map_or(Vec::new(), |b| handle_rects(b, scale, m)) {
             // The right handle's drag hides the third, the third's the other two.
             let hidden = match self.held.map(|h| h.0) {
@@ -926,8 +966,8 @@ impl Clips {
         if let Some(mut marquee) = self.marquee.take() {
             marquee.follow(pos, m.u(1.0));
             let region = marquee.region(grid);
-            let touched = (blocks.iter()).filter(|(_, rect)| rect.intersects(region));
-            self.set_selection(touched.map(|&(r, _)| r).collect());
+            let touched = (blocks.iter()).filter(|(_, rect, _)| rect.intersects(region));
+            self.set_selection(touched.map(|&(r, _, _)| r).collect());
             if marquee.dragged {
                 paint_marquee(&painter, marquee.drawn(m.u(1.0)), &app.cx);
             }
@@ -2202,6 +2242,16 @@ pub(crate) fn find(song: &Song, r: ClipRef) -> Option<&Clip> {
     lane.clips.iter().find(|c| c.id == r.id)
 }
 
+/// Resolve the clip position retained while visible blocks were enumerated, falling back to its stable identity if
+/// an intervening UI action changed lane structure. The fast path is safe only when the ID still matches.
+fn find_at(song: &Song, r: ClipRef, position: usize) -> Option<&Clip> {
+    let lane = song.channels.get(r.channel)?.lanes.get(r.lane)?;
+    lane.clips
+        .get(position)
+        .filter(|clip| clip.id == r.id)
+        .or_else(|| find(song, r))
+}
+
 fn find_mut(song: &mut Song, r: ClipRef) -> Option<&mut Clip> {
     let lane = lane_mut(song, r.channel, r.lane)?;
     lane.clips.iter_mut().find(|c| c.id == r.id)
@@ -2619,10 +2669,17 @@ pub(crate) fn wave_mesh_cache_size() -> (usize, usize) {
         let cache = cache.borrow();
         (
             cache.len(),
-            cache.iter().map(|entry| mesh_bytes(&entry.mesh)
-                + entry.volume.as_ref().map_or(0, |v| v.memory_bytes())
-                + entry.stereo.as_ref().map_or(0, |s| s.iter().map(|v| v.memory_bytes()).sum::<usize>())
-            ).sum(),
+            cache
+                .iter()
+                .map(|entry| {
+                    mesh_bytes(&entry.mesh)
+                        + entry.volume.as_ref().map_or(0, |v| v.memory_bytes())
+                        + entry
+                            .stereo
+                            .as_ref()
+                            .map_or(0, |s| s.iter().map(|v| v.memory_bytes()).sum::<usize>())
+                })
+                .sum(),
         )
     })
 }
@@ -4409,6 +4466,26 @@ mod tests {
     use eframe::egui::{Rangef, vec2};
 
     const BEAT: f64 = PPQ as f64;
+
+    #[test]
+    fn retained_clip_position_checks_identity_and_falls_back_after_reordering() {
+        let mut song = Song::default();
+        song.add_channel(ChannelKind::AudioClip);
+        let lane = &mut song.channels[1].lanes[0];
+        let first = lane.add_clip(0, 1.0).id;
+        let retained = lane.add_clip(PPQ, 1.0).id;
+        let r = ClipRef {
+            channel: 1,
+            lane: 0,
+            id: retained,
+        };
+        assert_eq!(find_at(&song, r, 1).map(|clip| clip.id), Some(retained));
+        song.channels[1].lanes[0].clips.swap(0, 1);
+        assert_eq!(find_at(&song, r, 1).map(|clip| clip.id), Some(retained));
+        assert_ne!(find_at(&song, r, 1).map(|clip| clip.id), Some(first));
+        song.channels[1].lanes[0].clips.clear();
+        assert!(find_at(&song, r, 1).is_none());
+    }
 
     /// A notes clip at `start` ticks, `visible` beats long (0 = its loop), looping every `looped` beats and
     /// starting `offset` beats into its content.
