@@ -23,6 +23,8 @@ jobs:
             sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
           - label: pr-9224737
             sha: 9224737b48de1f073773cd70dc5085b29de5b3b0
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -130,6 +132,8 @@ jobs:
             sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
           - label: pr-e8ac013
             sha: e8ac0138774700f7215e456a6c3b5accf7c6fe93
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -173,3 +177,81 @@ jobs:
           PYCLIPPY
           cat /tmp/clippy.log
           exit "$rc"
+
+  wasm-base-pr:
+    name: WASM check (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Check workspace for WASM and report diagnostics
+        shell: bash
+        run: |
+          set +e
+          cargo check --workspace --target wasm32-unknown-unknown > /tmp/wasm.log 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'PYWASM'
+          import pathlib
+          lines = pathlib.Path("/tmp/wasm.log").read_text(errors="replace").splitlines()
+          picked = [line for line in lines if any(token in line for token in ("error", "warning", "could not compile", "failed to run"))]
+          for line in (picked or lines[-30:])[-40:]:
+              msg = line.replace("%", "%25").replace("\\r", "%0D").replace("\\n", "%0A")
+              print(f"::error title=WASM check::{msg[:900]}")
+          PYWASM
+          fi
+          exit "$rc"
+
+  workspace-tests-base-pr:
+    name: Workspace tests (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Run workspace tests and report failing cases
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace -- --color never > /tmp/workspace-tests.log 2>&1
+          rc=$?
+          python3 - "$rc" <<'PYTESTS'
+          import pathlib, re, sys
+          rc = int(sys.argv[1])
+          lines = pathlib.Path("/tmp/workspace-tests.log").read_text(errors="replace").splitlines()
+          if rc == 0:
+              summaries = [line for line in lines if line.startswith("test result:")]
+              print("::notice title=Workspace test result::PASS: " + " | ".join(summaries[-6:]))
+              sys.exit(0)
+          picked = [line for line in lines if re.search(r"test .* \.\.\. FAILED$", line) or any(token in line for token in ("panicked at", "assertion", "test result: FAILED", "error:", "could not compile", "failed to run"))]
+          for line in (picked or lines[-80:])[-80:]:
+              msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Workspace test diagnostic::{msg[:900]}")
+          sys.exit(rc)
+          PYTESTS
+          exit "$?"
