@@ -655,7 +655,7 @@ mod clip_envelope_tests {
                     midi_rescan: false,
                 };
                 let grid = ui.max_rect();
-                editor.show(ui, &mut app, &[(r, BLOCK)], Some(r), grid, axis(), None);
+                editor.show(ui, &mut app, &[(r, BLOCK, 0)], Some(r), grid, axis(), None);
                 edit = app.edit;
             });
             self.edits.push(edit);

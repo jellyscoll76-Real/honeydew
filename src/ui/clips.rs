@@ -666,7 +666,7 @@ impl Clips {
                     .channels
                     .get(channel)
                     .and_then(|c| c.lanes.get(lane));
-                clips.into_iter().flat_map(|l| {
+                clips.into_iter().flat_map(move |l| {
                     l.clips.iter().enumerate().map(move |(position, clip)| {
                         let r = ClipRef {
                             channel,

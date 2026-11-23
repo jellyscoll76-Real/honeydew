@@ -617,7 +617,6 @@ fn profile_ui(
             },
         );
         let indexed_shapes = indexed_output.shapes.len();
-        let start = Instant::now();
         let indexed_primitives = indexed_ctx.tessellate(indexed_output.shapes, 1.0);
         let indexed_vertices: usize = indexed_primitives
             .iter()
@@ -627,7 +626,6 @@ fn profile_ui(
             })
             .sum();
         black_box(indexed_primitives);
-        let indexed_tess = start.elapsed().as_secs_f64() * 1000.0;
         assert_eq!(
             (indexed_shapes, indexed_vertices),
             (shapes, vertices),
