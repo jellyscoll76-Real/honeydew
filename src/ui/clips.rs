@@ -4274,16 +4274,15 @@ impl FloatingRow {
             self.track(view, sel.as_ref().map(|s| s.rect), press, release);
         }
         let (c, m) = (&cx.theme.colors, cx.m);
-        // Keep targets at least 44 logical points where possible. Wrap rather
-        // than hide or shrink six actions off the edge of a small phone.
+        // Clip actions stay in one row. A wrapped row can be taller than the shallow audio/automation
+        // grid, making Edit disappear; this geometry is covered by the editor-wiring regression test.
         let lane_actions = id == "clip_button";
         let (columns, slot, size) = if lane_actions {
-            let mut layout =
-                action_row_layout(view.grid.width(), labels.len(), m.u(1.75), m.u(ROW_M));
-            if layout.2.y > view.grid.height() {
-                layout = action_row_layout(view.grid.width(), labels.len(), 44.0, m.u(ROW_M));
-            }
-            layout
+            (
+                labels.len().max(1),
+                m.u(ROW_SLOT),
+                vec2(m.u(ROW_SLOT) * labels.len() as f32, m.u(LANE_BUTTON_D)),
+            )
         } else {
             (
                 labels.len().max(1),
@@ -4316,11 +4315,7 @@ impl FloatingRow {
         for (i, &label) in labels.iter().enumerate() {
             let center = pos2(
                 row.left() + ((i % columns) as f32 + 0.5) * slot,
-                if lane_actions {
-                    row.top() + ((i / columns) as f32 + 0.5) * slot
-                } else {
-                    row.center().y
-                },
+                row.center().y,
             );
             // Light floating-row bubbles, not `background` discs in a `text` ring. The button takes its full disc
             // while it pops in.
@@ -4351,19 +4346,6 @@ impl FloatingRow {
         }
         clicked
     }
-}
-
-/// Columns, target pitch and bounds shared by every floating action.
-fn action_row_layout(width: f32, count: usize, desired: f32, margin: f32) -> (usize, f32, Vec2) {
-    let room = (width - 2.0 * margin).max(1.0);
-    let slot = desired.max(44.0).min(room);
-    let columns = ((room / slot).floor() as usize).max(1).min(count.max(1));
-    let rows = count.div_ceil(columns);
-    (
-        columns,
-        slot,
-        vec2(columns as f32 * slot, rows as f32 * slot),
-    )
 }
 
 /// A floating row's pop-in scale at `a` (1 when settled).

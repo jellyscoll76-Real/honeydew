@@ -94,106 +94,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: 9224737b48de1f073773cd70dc5085b29de5b3b0
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.91.0
       - uses: Swatinem/rust-cache@v2
       - name: System libraries
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
-      - name: Run controlled FloatingRow variants
+      - name: Verify the FloatingRow Edit regression fix
         shell: bash
         run: |
           set +e
-          python3 - <<'PY'
-          from pathlib import Path
-          import subprocess
-
-          path = Path("src/ui/clips.rs")
-          original = path.read_text()
-          test = "app::tests::editor_wiring::editors::a_clips_edit_opens_the_automation_or_audio_editor_with_undo_and_preview"
-
-          def run(label):
-              log = Path("/tmp/floating-row-" + label + ".log")
-              with log.open("w") as output:
-                  result = subprocess.run(
-                      ["cargo", "test", "-p", "banaforge", "--lib", test, "--", "--exact", "--nocapture"],
-                      stdout=output, stderr=subprocess.STDOUT,
-                  )
-              lines = log.read_text(errors="replace").splitlines()
-              passed = result.returncode == 0 and any("1 passed" in line for line in lines if line.startswith("test result:"))
-              if passed:
-                  print(f"::notice title=FloatingRow {label}::PASS: the audio/automation Edit test passed")
-              else:
-                  picked = [line for line in lines if any(k in line for k in ("FAILED", "panicked at", "assertion", "left:", "right:", "test result:", "error:"))]
-                  if not picked:
-                      picked = lines[-20:]
-                  for line in picked[-20:]:
-                      msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-                      print(f"::warning title=FloatingRow {label}::{msg[:900]}")
-              return passed
-
-          results = {}
-
-          # Keep the new layout and feedback state, but use the pre-change DiscResponse widget.
-          candidate = original.replace("let pressed = if lane_actions {", "let pressed = if false {", 1)
-          assert candidate != original
-          path.write_text(candidate)
-          results["legacy-button"] = run("legacy-button")
-
-          # Keep the new widget, but restore the old one-row geometry and spacing.
-          start = original.index("        let (columns, slot, size) = if lane_actions {")
-          end = original.index("\n        let px = ", start)
-          legacy_layout = """        let (columns, slot, size) = if lane_actions {
-              (
-                  labels.len().max(1),
-                  m.u(ROW_SLOT),
-                  vec2(m.u(ROW_SLOT) * labels.len() as f32, m.u(LANE_BUTTON_D)),
-              )
-          } else {
-              (
-                  labels.len().max(1),
-                  m.u(ROW_SLOT),
-                  vec2(m.u(ROW_SLOT) * labels.len() as f32, m.u(1.5)),
-              )
-          };"""
-          candidate = original[:start] + legacy_layout + original[end:]
-          center_start = candidate.index("            let center = pos2(")
-          center_if = candidate.index("                if lane_actions {", center_start)
-          center_end = candidate.index("                },", center_if) + len("                },")
-          candidate = candidate[:center_if] + "                row.center().y," + candidate[center_end:]
-          path.write_text(candidate)
-          results["legacy-layout"] = run("legacy-layout")
-
-          # Use the new layout first, but reduce slot pitch to the 44-point minimum whenever it wraps;
-          # this checks whether the taller multi-row toolbar is what hides Edit on the audio row.
-          candidate = original.replace(
-              "if layout.2.y > view.grid.height() {",
-              "if layout.0 < labels.len() || layout.2.y > view.grid.height() {",
-              1,
-          )
-          assert candidate != original
-          path.write_text(candidate)
-          results["min44-single-row-fallback"] = run("min44-single-row-fallback")
-
-          # Replace only FloatingRow::show with the base implementation; keep the PR's clip lookup,
-          # selection and navigation dispatch code. ROW_B was renamed in the PR.
-          base = subprocess.check_output(
-              ["git", "show", "05bdebb889dc1a540447f88fbcea2963d8f477d3:src/ui/clips.rs"], text=True
-          )
-          def span(source):
-              impl = source.index("impl FloatingRow")
-              start = source.index("    /// The row of light bubbles", impl)
-              end = source.index("\n}\n\n/// A floating row's pop-in", start)
-              return start, end
-          b0, b1 = span(base)
-          p0, p1 = span(original)
-          legacy_show = base[b0:b1].replace("ROW_B", "LANE_BUTTON_D")
-          path.write_text(original[:p0] + legacy_show + original[p1:])
-          results["base-show"] = run("base-show")
-          path.write_text(original)
-          print("::notice title=FloatingRow isolation summary::" + ", ".join(f"{k}={'PASS' if v else 'FAIL'}" for k, v in results.items()))
-          PY
+          test='app::tests::editor_wiring::editors::a_clips_edit_opens_the_automation_or_audio_editor_with_undo_and_preview'
+          cargo test -p banaforge --lib "$test" -- --exact --nocapture > /tmp/floating-row-current.log 2>&1
+          rc=$?
+          python3 - "$test" /tmp/floating-row-current.log "$rc" <<'PYTEST'
+          import pathlib, re, sys
+          test, path, rc = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          lines = pathlib.Path(path).read_text(errors="replace").splitlines()
+          if rc == 0 and any("1 passed" in line for line in lines if line.startswith("test result:")):
+              print(f"::notice title=FloatingRow Edit fix::PASS: {test}")
+              sys.exit(0)
+          picked = [line for line in lines if any(k in line for k in ("FAILED", "panicked at", "assertion", "left:", "right:", "test result:", "error:"))]
+          for line in (picked or lines[-30:])[-30:]:
+              msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=FloatingRow Edit fix::{msg[:900]}")
+          sys.exit(1)
+          PYTEST
 
   clippy-base-pr:
     name: Clippy (${{ matrix.label }})
