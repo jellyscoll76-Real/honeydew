@@ -1,0 +1,397 @@
+name: Base versus PR regressions
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  compare:
+    name: targeted tests (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-9224737
+            sha: 9224737b48de1f073773cd70dc5085b29de5b3b0
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Record exact Rust and formatting result
+        id: fmt
+        shell: bash
+        run: |
+          rustc --version
+          set +e
+          cargo fmt --check > /tmp/rustfmt.log 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'PYFMT'
+          import pathlib
+          text = pathlib.Path("/tmp/rustfmt.log").read_text(errors="replace")
+          text = text[-8000:] or "cargo fmt --check failed without output"
+          for start in range(0, len(text), 900):
+              msg = text[start:start+900].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Rust 1.91 formatting diff::{msg}")
+          PYFMT
+          fi
+          exit "$rc"
+      - name: Compare regression tests against both SHAs
+        if: ${{ always() && !cancelled() }}
+        shell: bash
+        run: |
+          set +e
+          failed=0
+          for test in \
+            'app::tests::editor_wiring::editors::a_clips_edit_opens_the_automation_or_audio_editor_with_undo_and_preview' \
+            'app::tests::editor_wiring::the_wheel_scrolls_no_piano_roll_under_the_rack_but_beside_it' \
+            'app::tests::drumsets::the_drumsets_root_lists_my_files_default_and_the_four_kits' \
+            'app::tests::the_logo_opens_the_main_menu_whose_tabs_switch_and_whose_close_x_closes_it' \
+            'ui::main_screen::tests::a_shown_rows_circles_pop_in'; do
+            safe=$(printf '%s' "$test" | tr ':' '_')
+            log="/tmp/${safe}.log"
+            cargo test -p banaforge --lib "$test" -- --exact --nocapture > "$log" 2>&1
+            rc=$?
+            python3 - "$test" "$log" "$rc" <<'PYTEST'
+          import pathlib, re, sys
+          test, path, rc = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          lines = pathlib.Path(path).read_text(errors="replace").splitlines()
+          if rc == 0:
+              matches = [line for line in lines if line.startswith("test result:") or re.search(rf"test {re.escape(test)} \.\.\. ok", line)]
+              if not any("1 passed" in line for line in matches):
+                  print(f"::error title={test}::cargo exited 0 but did not confirm exactly one test ran")
+                  sys.exit(1)
+              print(f"::notice title={test}::PASS: " + " | ".join(matches[-2:]))
+          else:
+              picked = [line for line in lines if any(token in line for token in ("FAILED", "panicked at", "assertion", "left:", "right:", "error:", "test result:"))]
+              if not picked:
+                  picked = lines[-20:]
+              for line in picked[-30:]:
+                  msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print(f"::error title={test}::{msg[:900]}")
+              sys.exit(1)
+          PYTEST
+            if [ "$?" -ne 0 ]; then failed=1; fi
+          done
+          exit "$failed"
+
+  isolate-floating-row:
+    name: isolate floating-row Edit regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Verify the FloatingRow Edit regression fix
+        shell: bash
+        run: |
+          set +e
+          test='app::tests::editor_wiring::editors::a_clips_edit_opens_the_automation_or_audio_editor_with_undo_and_preview'
+          cargo test -p banaforge --lib "$test" -- --exact --nocapture > /tmp/floating-row-current.log 2>&1
+          rc=$?
+          python3 - "$test" /tmp/floating-row-current.log "$rc" <<'PYTEST'
+          import pathlib, re, sys
+          test, path, rc = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          lines = pathlib.Path(path).read_text(errors="replace").splitlines()
+          if rc == 0 and any("1 passed" in line for line in lines if line.startswith("test result:")):
+              print(f"::notice title=FloatingRow Edit fix::PASS: {test}")
+              sys.exit(0)
+          picked = [line for line in lines if any(k in line for k in ("FAILED", "panicked at", "assertion", "left:", "right:", "test result:", "error:"))]
+          for line in (picked or lines[-30:])[-30:]:
+              msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=FloatingRow Edit fix::{msg[:900]}")
+          sys.exit(1)
+          PYTEST
+
+  clippy-base-pr:
+    name: Clippy (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-e8ac013
+            sha: e8ac0138774700f7215e456a6c3b5accf7c6fe93
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Run exact workspace Clippy and report diagnostics
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets --message-format=json -- -D warnings > /tmp/clippy.json 2>/tmp/clippy.log
+          rc=$?
+          python3 - <<'PYCLIPPY'
+          import json, pathlib
+          found = False
+          for line in pathlib.Path("/tmp/clippy.json").read_text(errors="replace").splitlines():
+              try:
+                  item = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if item.get("reason") != "compiler-message":
+                  continue
+              diag = item.get("message", {})
+              if diag.get("level") not in ("warning", "error"):
+                  continue
+              found = True
+              code = (diag.get("code") or {}).get("code", "rustc")
+              spans = [span for span in diag.get("spans", []) if span.get("is_primary")]
+              if not spans:
+                  spans = [{"file_name": ".github", "line_start": 1}]
+              for span in spans:
+                  message = diag.get("message", "diagnostic").replace("%", "%25").replace("\\r", "%0D").replace("\\n", " ")
+                  command = "error" if diag.get("level") == "error" else "warning"
+                  print(f"::{command} file={span['file_name']},line={span['line_start']},title={code}::{message}")
+          if not found:
+              print("::notice title=Clippy::No compiler warnings or errors")
+          PYCLIPPY
+          cat /tmp/clippy.log
+          exit "$rc"
+
+  wasm-base-pr:
+    name: WASM check (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Check workspace for WASM and report diagnostics
+        shell: bash
+        run: |
+          set +e
+          cargo check --workspace --target wasm32-unknown-unknown > /tmp/wasm.log 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            python3 - <<'PYWASM'
+          import pathlib
+          lines = pathlib.Path("/tmp/wasm.log").read_text(errors="replace").splitlines()
+          picked = [line for line in lines if any(token in line for token in ("error", "warning", "could not compile", "failed to run"))]
+          for line in (picked or lines[-30:])[-40:]:
+              msg = line.replace("%", "%25").replace("\\r", "%0D").replace("\\n", "%0A")
+              print(f"::error title=WASM check::{msg[:900]}")
+          PYWASM
+          fi
+          exit "$rc"
+
+  workspace-tests-base-pr:
+    name: Workspace tests (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Run workspace tests and report failing cases
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace -- --color never > /tmp/workspace-tests.log 2>&1
+          rc=$?
+          python3 - "$rc" <<'PYTESTS'
+          import pathlib, re, sys
+          rc = int(sys.argv[1])
+          lines = pathlib.Path("/tmp/workspace-tests.log").read_text(errors="replace").splitlines()
+          if rc == 0:
+              summaries = [line for line in lines if line.startswith("test result:")]
+              print("::notice title=Workspace test result::PASS: " + " | ".join(summaries[-6:]))
+              sys.exit(0)
+          picked = [line for line in lines if re.search(r"test .* \.\.\. FAILED$", line) or any(token in line for token in ("panicked at", "assertion", "test result: FAILED", "error:", "could not compile", "failed to run"))]
+          for line in (picked or lines[-80:])[-80:]:
+              msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Workspace test diagnostic::{msg[:900]}")
+          sys.exit(rc)
+          PYTESTS
+          exit "$?"
+
+  floating-row-behavior-base-pr:
+    name: FloatingRow behavior (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: pr-9224737 cross-track tap
+            sha: 9224737b48de1f073773cd70dc5085b29de5b3b0
+            test: app::tests::floating_row::a_tap_on_a_clip_of_another_track_shows_the_row_over_it
+          - label: pr-current-head cross-track tap
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+            test: app::tests::floating_row::a_tap_on_a_clip_of_another_track_shows_the_row_over_it
+          - label: base-05bdebb cross-track tap
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+            test: app::tests::floating_row::a_tap_on_a_clip_of_another_track_shows_the_row_over_it
+          - label: pr-9224737 right-edge
+            sha: 9224737b48de1f073773cd70dc5085b29de5b3b0
+            test: app::tests::floating_row::the_playlists_row_waits_at_the_grids_right_edge_while_the_selected_copy_is_past_it
+          - label: base-05bdebb right-edge
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+            test: app::tests::floating_row::the_playlists_row_waits_at_the_grids_right_edge_while_the_selected_copy_is_past_it
+          - label: pr-current-head right-edge
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+            test: app::tests::floating_row::the_playlists_row_waits_at_the_grids_right_edge_while_the_selected_copy_is_past_it
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Run exact FloatingRow behavior test with panic context
+        shell: bash
+        run: |
+          set +e
+          test='${{ matrix.test }}'
+          cargo test -p banaforge --lib "$test" -- --exact --nocapture > /tmp/floating-row-behavior.log 2>&1
+          rc=$?
+          python3 - "$test" "$rc" <<'PYTAP'
+          import pathlib, sys
+          test, rc = sys.argv[1], int(sys.argv[2])
+          lines = pathlib.Path("/tmp/floating-row-behavior.log").read_text(errors="replace").splitlines()
+          if rc == 0 and any("1 passed" in line for line in lines if line.startswith("test result:")):
+              print(f"::notice title=FloatingRow behavior::{test} passed")
+              sys.exit(0)
+          picked = []
+          for i, line in enumerate(lines):
+              if any(token in line for token in ("FAILED", "panicked at", "assertion", "left:", "right:", "track ", "test result:", "error:")):
+                  picked.extend(lines[i:i+5] if "panicked at" in line else [line])
+          for line in dict.fromkeys(picked or lines[-80:]):
+              msg = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=FloatingRow behavior::{msg[:900]}")
+          sys.exit(1)
+          PYTAP
+
+  main-menu-order-base-pr:
+    name: Main-menu test order (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base-05bdebb
+            sha: 05bdebb889dc1a540447f88fbcea2963d8f477d3
+          - label: pr-current-head
+            sha: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Repeat isolated test and compare app-suite execution modes
+        shell: bash
+        run: |
+          set +e
+          menu='app::tests::the_logo_opens_the_main_menu_whose_tabs_switch_and_whose_close_x_closes_it'
+          isolated_fail=0
+          for n in 1 2 3 4 5; do
+            cargo test -p banaforge --lib "$menu" -- --exact > "/tmp/menu-isolated-$n.log" 2>&1
+            rc=$?
+            python3 - "$menu" "$n" "$rc" "/tmp/menu-isolated-$n.log" <<'PYISO'
+          import pathlib, re, sys
+          menu, attempt, rc, path = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+          text = pathlib.Path(path).read_text(errors="replace")
+          text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+          lines = text.splitlines()
+          result = next((line for line in lines if line.startswith("test result:")), "no test-result summary")
+          test = next((line for line in lines if menu in line and (" ... ok" in line or " ... FAILED" in line)), "target test line missing")
+          passed = rc == 0 and "1 passed" in result and " ... ok" in test
+          command = "notice" if passed else "error"
+          print(f"::{command} title=Isolated main-menu attempt {attempt}::exit={rc}; {result}; {test}")
+          if not passed:
+              for line in lines:
+                  if "panicked at" in line or "assertion" in line or "left:" in line or "right:" in line:
+                      print(f"::error title=Isolated failure detail::{line[:900]}")
+          sys.exit(0 if passed else 1)
+          PYISO
+            if [ "$?" -ne 0 ]; then isolated_fail=1; fi
+          done
+          parallel_rc=0
+          cargo test -p banaforge --lib app::tests:: -- --nocapture > /tmp/app-tests-parallel.log 2>&1 || parallel_rc=$?
+          serial_rc=0
+          cargo test -p banaforge --lib app::tests:: -- --test-threads=1 --nocapture > /tmp/app-tests-serial.log 2>&1 || serial_rc=$?
+          python3 - "$menu" "$parallel_rc" "$serial_rc" <<'PY'
+          import pathlib, re, sys
+          menu, parallel_rc, serial_rc = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+          failed_target = False
+          for mode, code in (("parallel", parallel_rc), ("serial", serial_rc)):
+              text = pathlib.Path(f"/tmp/app-tests-{mode}.log").read_text(errors="replace")
+              text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+              lines = text.splitlines()
+              result = next((line for line in lines if line.startswith("test result:")), "no test-result summary")
+              target_lines = [line for line in lines if menu in line]
+              target = next((line for line in target_lines if " ... ok" in line or " ... FAILED" in line), "target test line missing")
+              passed = " ... ok" in target
+              failed_target |= not passed
+              command = "notice" if passed else "error"
+              print(f"::{command} title=Main-menu {mode} app suite::exit={code}; {result}; {target}")
+              if not passed:
+                  for i, line in enumerate(lines):
+                      if menu in line and "FAILED" in line:
+                          for detail in lines[i:i+6]:
+                              print(f"::error title=Main-menu {mode} failure detail::{detail[:900]}")
+              failures = [line for line in lines if re.search(r"^test .* \.\.\. FAILED$", line)]
+              print(f"::notice title=App suite {mode}::exit={code}; failed tests={len(failures)}")
+              for line in failures[:20]:
+                  print(f"::warning title=App suite {mode} failure::{line[:900]}")
+          sys.exit(1 if failed_target else 0)
+          PY
+          python_rc=$?
+          if [ "$isolated_fail" -ne 0 ]; then exit 1; fi
+          exit "$python_rc"

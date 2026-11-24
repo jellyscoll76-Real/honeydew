@@ -904,6 +904,8 @@ impl ProjectFiles {
     }
 
     /// Changes with every save and every copy kept in the library.
+    pub(crate) fn auto_save_completed(&mut self) { self.library_changes += 1; }
+
     pub fn library_changes(&self) -> u64 {
         self.library_changes
     }
@@ -1533,12 +1535,17 @@ impl ProjectFiles {
         }
         let lines = self.message.take()?;
         let render_feedback = std::mem::take(&mut self.render_feedback);
-        if (self.rendered.is_some() && lines.first().is_some_and(|s| s == export::RENDER_COMPLETE)) || render_feedback {
+        if (self.rendered.is_some() && lines.first().is_some_and(|s| s == export::RENDER_COMPLETE))
+            || render_feedback
+        {
             let success = lines.first().is_some_and(|s| s == export::RENDER_COMPLETE);
             return Some(Overlay::ExportResult {
-                lines, success,
+                lines,
+                success,
                 open: success && self.rendered.is_some(),
-                share: success && self.rendered.is_some() && cfg!(any(target_os = "android", target_os = "ios")),
+                share: success
+                    && self.rendered.is_some()
+                    && cfg!(any(target_os = "android", target_os = "ios")),
             });
         }
         let (tag, confirm, extra) = match self.waiting_for() {
@@ -2031,3 +2038,17 @@ fn platform_provider() -> Box<dyn FileProvider> {
 pub(crate) mod mem;
 #[cfg(test)]
 pub(crate) mod tests;
+
+/// Opt-in recovery copies are always separate from the manually saved project.
+pub(crate) fn auto_save_snapshot(song: &Song) -> Song {
+    stamped(song, song.title.clone())
+}
+impl ProjectFiles {
+    pub(crate) fn auto_save_root(&self) -> Option<PathBuf> {
+        Some(
+            self.disk_user_dir()?
+                .join(crate::ui::main_menu::SONGS_FOLDER)
+                .join("Auto-saved projects"),
+        )
+    }
+}

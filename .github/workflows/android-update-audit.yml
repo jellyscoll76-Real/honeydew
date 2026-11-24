@@ -1,0 +1,79 @@
+name: Android update identity audit
+on:
+  push:
+    branches: ["arena/**"]
+    paths: ['.github/workflows/android-update-audit.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Public identity, signing, update policy and native verifier regressions
+        run: python3 -m unittest discover -s tools -p 'test_*android*.py' -v
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - run: sdkmanager 'build-tools;36.0.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: banaforge-android-apk
+          run-id: 44972042580
+          github-token: ${{ github.token }}
+          path: /tmp/released-31
+      - uses: actions/download-artifact@v4
+        with:
+          name: banaforge-android-apk
+          run-id: 45012769205
+          github-token: ${{ github.token }}
+          path: /tmp/released-32
+      - name: Audit released APK identities and signing configuration
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess, re, json
+          tools=pathlib.Path(os.environ['ANDROID_HOME'])/'build-tools/36.0.0'
+          report={}
+          for version in ['31','32']:
+              files=list(pathlib.Path('/tmp/released-'+version).rglob('*.apk'))
+              assert len(files)==1, files
+              cert=subprocess.check_output([str(tools/'apksigner'),'verify','--print-certs',str(files[0])],text=True)
+              badging=subprocess.check_output([str(tools/'aapt'),'dump','badging',str(files[0])],text=True)
+              report['0.5.'+version]={
+                  'certificate_sha256':re.search(r'Signer #1 certificate SHA-256 digest: (\w+)',cert).group(1),
+                  'package':badging.splitlines()[0],
+                  'abis':next(line for line in badging.splitlines() if line.startswith('native-code:')),
+              }
+          report['same_certificate']=report['0.5.31']['certificate_sha256']==report['0.5.32']['certificate_sha256']
+          report['configured_secrets_present']={name:bool(os.environ.get(name)) for name in ['KS','STORE_PASS','KEY_ALIAS','KEY_PASS']}
+          # Inspect an existing configured key only; never generate or publish a private key.
+          if all(report['configured_secrets_present'].values()):
+              import base64
+              path=pathlib.Path(os.environ['RUNNER_TEMP'])/'audit.jks'
+              try:
+                  path.write_bytes(base64.b64decode(os.environ['KS'],validate=True))
+                  path.chmod(0o600)
+                  result=subprocess.check_output(['keytool','-exportcert','-keystore',str(path),'-storepass:env','STORE_PASS','-alias',os.environ['KEY_ALIAS']],stderr=subprocess.DEVNULL)
+                  import hashlib
+                  report['configured_certificate_sha256']=hashlib.sha256(result).hexdigest()
+              finally:
+                  path.unlink(missing_ok=True)
+          text=json.dumps(report,indent=2)
+          pathlib.Path('android-update-audit.json').write_text(text+'\n')
+          print('::notice title=Android update identity audit::'+text.replace('%','%25').replace('\n','%0A'))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-update-public-identity-audit
+          path: android-update-audit.json

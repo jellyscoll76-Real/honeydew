@@ -1,0 +1,84 @@
+name: Standalone Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: Target ABI set
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - arm64-v8a
+          - armeabi-v7a
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  standalone-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce APK release hold
+        run: |
+          if [ -f android/RELEASE_HOLD.md ]; then
+            echo '::error::APK distribution is on hold; complete the standalone migration and device gates first.'
+            exit 1
+          fi
+      - name: Standalone signing and packaging regressions
+        run: |
+          python3 -m unittest discover -s tools -p 'test_android_*.py' -v
+          sh -n tools/android-dist.sh
+      - name: Require a reviewed standalone certificate pin
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          pin = Path('android/standalone-release-certificate.sha256').read_text().strip()
+          if not re.fullmatch(r'[0-9a-f]{64}', pin):
+              raise SystemExit('Standalone signing certificate pin is unset or malformed.')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-standalone-arm
+          cache-on-failure: true
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Android build tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y libclang-dev
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.0.13004108'
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build and verify standalone APK
+        env:
+          BANAFORGE_STANDALONE_KEYSTORE_BASE64: ${{ secrets.BANAFORGE_STANDALONE_KEYSTORE_BASE64 }}
+          BANAFORGE_STANDALONE_KEYSTORE_PASSWORD: ${{ secrets.BANAFORGE_STANDALONE_KEYSTORE_PASSWORD }}
+          BANAFORGE_STANDALONE_KEY_ALIAS: ${{ secrets.BANAFORGE_STANDALONE_KEY_ALIAS }}
+          BANAFORGE_STANDALONE_KEY_PASSWORD: ${{ secrets.BANAFORGE_STANDALONE_KEY_PASSWORD }}
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108"
+          tools/android-dist.sh --standalone-release --abi '${{ inputs.abi }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: banaforge-standalone-android
+          path: |
+            target/banaforge-android-standalone-*.apk
+            target/standalone-android-identity.json
+          if-no-files-found: error
+          retention-days: 14

@@ -309,7 +309,7 @@ impl Editor {
         &mut self,
         ui: &mut egui::Ui,
         app: &mut AppCtx,
-        blocks: &[(ClipRef, Rect)],
+        blocks: &[(ClipRef, Rect, usize)],
         selected: Option<ClipRef>,
         grid: Rect,
         axis: TimeAxis,
@@ -392,7 +392,7 @@ impl Editor {
                     return true;
                 }
                 if (drag.moved || !drag.bound)
-                    && let Some((_, b)) = blocks.iter().find(|(r, _)| *r == drag.clip)
+                    && let Some((_, b, _)) = blocks.iter().find(|(r, _, _)| *r == drag.clip)
                 {
                     let values = value_rect(
                         lanes(area(clip_box(*b, app.cx.m), app.cx.m))[drag.lane],
@@ -441,7 +441,7 @@ impl Editor {
             return false;
         };
         // Same topmost ordering as clip bodies. Unselected clips keep ordinary select/move behavior.
-        let Some(&(r, b)) = blocks.iter().rev().find(|(_, b)| b.contains(p)) else {
+        let Some(&(r, b, _)) = blocks.iter().rev().find(|(_, b, _)| b.contains(p)) else {
             return false;
         };
         if Some(r) != selected {
@@ -655,7 +655,7 @@ mod clip_envelope_tests {
                     midi_rescan: false,
                 };
                 let grid = ui.max_rect();
-                editor.show(ui, &mut app, &[(r, BLOCK)], Some(r), grid, axis(), None);
+                editor.show(ui, &mut app, &[(r, BLOCK, 0)], Some(r), grid, axis(), None);
                 edit = app.edit;
             });
             self.edits.push(edit);

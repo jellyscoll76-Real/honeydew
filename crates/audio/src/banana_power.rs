@@ -220,8 +220,8 @@ impl State {
                     (0.08, 6.0, 2.8),
                 ][preset.min(3)];
                 let mut wet = [0.0; 2];
-                for band in 0..3 {
-                    let peak = bands[0][band].abs().max(bands[1][band].abs());
+                for (band, (&left, &right)) in bands[0].iter().zip(&bands[1]).enumerate() {
+                    let peak = left.abs().max(right.abs());
                     let k = if peak > self.envelope[band] {
                         0.015
                     } else {
@@ -234,9 +234,8 @@ impl State {
                     } else {
                         1.0
                     };
-                    for c in 0..2 {
-                        wet[c] += (bands[c][band] * gain * drive).tanh() / drive.tanh() * 1.25;
-                    }
+                    wet[0] += (left * gain * drive).tanh() / drive.tanh() * 1.25;
+                    wet[1] += (right * gain * drive).tanh() / drive.tanh() * 1.25;
                 }
                 for c in 0..2 {
                     output[c] = input[c] + self.p[1] * (wet[c] - input[c]);

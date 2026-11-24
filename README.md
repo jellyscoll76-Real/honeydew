@@ -225,7 +225,7 @@ tools/android-dist.sh
 
 This writes `target/banaforge-android-<version>-arm-debug.apk`, one APK for 64-bit and 32-bit ARM. Add `--base` for the APK without sounds (`-arm-base-debug.apk`), which downloads them. The debug app is called BanaForge Debug and installs alongside the release app. Its signing key is kept in `android/debug.keystore`; keep that file so debug builds can update each other.
 
-**Release signing:** use the same key for every release, or Android won't install updates over the old version. Back up the keystore and passwords outside the repository.
+**Release signing:** use the same key for every release, or Android won't install updates over the old version. Back up the keystore and passwords outside the repository. All release paths now require the approved public certificate in `android/release-certificate.sha256`; CI no longer generates disposable release keys. Missing/mismatched keys block publication. The pinned certificate identifies the last delivered v0.5.32 playtest APK, **not** proof that its private key is available. See [ANDROID_UPDATE_SAFETY.md](ANDROID_UPDATE_SAFETY.md) for the verified historical signing break, recovery blocker and device-test procedure.
 
 - **Local release:** set `ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`, then run `tools/android-dist.sh --release`.
 - **GitHub releases:** add the repository secrets `ANDROID_KEYSTORE_BASE64` (the keystore as base64), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Without them the Android job fails rather than publishing an unsigned APK.

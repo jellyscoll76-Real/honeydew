@@ -1,0 +1,69 @@
+# Complete backup/restore investigation — not a migration release
+
+## Scope and current decision
+
+The original installation and its files are not to be overwritten, uninstalled or cleared. No replacement signing key is to be generated as recovery. `android/RELEASE_HOLD.md` remains active. No new APK has been built or distributed for this work.
+
+**A complete, one-click, verified Android backup/restore workflow does not currently exist.** Project ZIP export is useful but insufficient. No user project data, Android device, developer computer or offline disk was supplied/mounted here; actual migration with copies has therefore not run. The new public-identity utility tests are not migration tests.
+
+This is an independent source review following `ANDROID_KEY_RECOVERY_REPORT.md`, with an implementation and test checklist. It does not approve migration or promise complete preservation.
+
+## Data inventory and source-level findings
+
+| Component | Existing mechanism | Required for a complete workflow |
+| --- | --- | --- |
+| Songs and edits | `.flm` save; project ZIP serializes the song and collects readable referenced user files (`src/project_files/export.rs`). Single-song ZIP import relinks supported content paths (`archive.rs`). | Inventory all projects, not only the open song. Save unsaved edits explicitly with consent. Preserve originals/alternate versions/recovery files separately. Verify round trips of notes, tempo, clips, automation, effects/racks, envelopes and VocalSynth state. |
+| Samples/recordings | `My Samples`, `My Recordings`; native audio files saved under the user root (`samples.rs`). Referenced recordings can enter a project ZIP. | Copy the complete folders, including unused recordings/samples and nested paths. Verify hashes and source-sample bytes. ZIP gathering can omit unreadable files and does not represent a complete inventory. |
+| Presets/racks/drumsets/chords | `My Presets`, `My Racks`, `My Drumsets`, `My Chord Sets` (`presets.rs`). Presets can refer to programs/samples. | Preserve all files plus dependency closure, not merely preset files. Keep names, case and hierarchy; generic import may route/rename collisions and is not a bit-for-bit library restore. Validate preset load and playback. |
+| Instruments/SoundFonts/MIDI/renders | `My Instruments`, `My SoundFonts`, `My MIDI`, `My Tracks` and supported imports. | Preserve all original files and nested DW/SFZ include/sample dependencies. MIDI/audio renders are useful reference copies, not substitutes for editable project state. |
+| Voicebanks | `My Voicebanks`; ZIP/UAR archive imports, folder copies and metadata indexing (`voicebanks.rs`). Imports may number an existing target folder rather than overwrite it. | Preserve entire banks, original archives, `oto.ini`, `character.txt`, metadata, encoding and samples—not just the index. Validate Japanese/Unicode filenames, aliases and project references. Reindex/relink in the destination; do not assume old absolute paths remain valid. Respect bank licenses; no public upload of user banks. |
+| Bundled/imported Original Content | `Original Content` deliberately excluded from project ZIP, even through alternate paths (`export.rs`, `content.rs`). | Record the content version and needed assets. Keep a permitted private backup or verify a source of the exact compatible content. Never silently substitute sounds or count a fresh soundless install as equivalent. |
+| Settings and routing | Internal `BanaForge/storage.json`; settings serialized under `banaforge.settings`, recording routing stored separately (`settings.rs`, `recording/routing.rs`). | No general settings exporter/importer exists. Implement a versioned, allowlisted preferences format with preview/validation, separate routing review, safe ranges/defaults and persistent round-trip tests. Exclude credentials/tokens, plugin caches, temporary paths and unsupported settings. Audio/MIDI devices and permissions need fresh device-specific validation. |
+| Themes/custom UI assets | Theme export/import exists; theme/content/keyboard-shortcut storage has its own paths. | Inventory custom themes and user-modified assets, export them separately now where supported, and include them explicitly in a future full-library manifest. Do not assume preferences JSON embeds every asset. |
+| Versions, recovery, extraction folders, recently deleted files, unrecognized user files | Song library has version/recovery behavior, `Unzipped songs` and `Recently Deleted` outside `My Songs` (`ui/main_menu/library.rs`, `project_files/mod.rs`). | Whole-root inventory with explicit include/exclude choices. Never silently purge or use typed import as backup: unknown files may not import. Auto-Save is opt-in; do not treat its recovery files as the only backup. Check recovery contents without replacing the original project. |
+| Runtime/private session state | Process memory and internal storage; not a public export contract. | Undo/redo history, unsaved/in-flight recordings, caches and transient selections are not guaranteed portable. Finish/save recording and save edits; clearly list non-preserved session state. Retain the old installation. |
+
+Normal user root: `Android/data/dev.daijro.banaforge/files`. Some installations may still fall back to the internal root if user-folder migration/storage initialization failed. Settings remain internal. App-specific external storage is **not** an independent backup; Android may remove it on uninstall. USB/MTP/file-manager visibility varies, and scoped storage can block access. Do not use root, unlock the bootloader or reset the device as a proposed backup method.
+
+## What can be done now without updating the installed app
+
+1. Identify the actual installed public identity using `ANDROID_INSTALLED_IDENTITY.md`. Keep the old app unchanged.
+2. Record supported settings and routing choices as screenshots/notes; export custom themes where the installed version supports it. Do not claim a settings file is accessible through a normal file picker.
+3. Save projects; export per-project ZIPs with **Send** and make the receiving app save a durable independent copy outside app-specific storage. Also keep original `.flm` files and original assets. Reopening the original during ordinary app use can update its session state; use a spare environment for restoration tests.
+4. Where the device permits it, copy the complete user root through a trusted computer, without moving/deleting source files. If access is blocked, stop and inventory which assets can be shared through existing supported UI actions; do not claim a full backup. Original sample/bank archives already outside the app can be preserved separately.
+5. Keep two independent backup copies. Never open/import into the only backup. A locally computed checksum proves copy equality, not that the project is musically or semantically intact.
+
+**Important old-install limitation:** implementing a new exporter in this repository will not make it available inside an old installation if its signing key is lost. A separately signed app cannot read that old app's sandbox. Therefore full automatic export of its internal settings is blocked unless a compatible key is recovered or the old app already exposes a supported export. Manual screenshots/reapplication remain a partial fallback, not full automatic preservation.
+
+## Implementation needed before claiming complete migration
+
+These components are proposed, **not implemented by this investigation**:
+
+1. **Read-only whole-library inventory and completeness report.** Manifest with schema/app version, relative paths, byte counts, streaming SHA-256 and categories; list every unreadable/missing/excluded/external dependency. No success status when required data is omitted. Full raw file inventory must be separate from typed project-import support. Never collect keystores, credentials or unrelated device data.
+2. **Durable Android export destination.** A cancellable Storage Access Framework document-provider writer (or equivalent verified existing share destination), bounded streaming/multipart archives suitable for large banks and ARMv7. Handle provider write errors, disk-full, interrupted writes and cleanup of incomplete destination copies without touching sources. Per-project ZIPs presently read whole files: ARMv7 256 MiB, ARM64 512 MiB, web 128 MiB limits plus archive expansion limits apply.
+3. **Explicit settings export/import.** Versioned allowlist, supported-field preview, redaction of secrets and nonportable paths/devices, independent routing review, validation and atomic persistence. Defaults should not silently erase absent settings. Keep audio safety and stable processing unchanged. This needs a compatible old build to export automatically, as explained above.
+4. **Staged restore to a new empty destination.** Validate manifest/checksums/path safety before commit. Reject zip-slip, absolute/drive paths, symlinks, duplicate/case/Unicode collisions and oversized/incomplete archives. Preserve bytes/hierarchy; preview conflicts, never replace existing files silently. Transactional promotion or recoverable journal, enough-space checks and cancellation/failure rollback confined to the staging tree.
+5. **Dependency and reference validation.** Resolve samples, DW/SFZ/SoundFont references, original-content versions, voicebank metadata/files and supported project paths against the staged destination, not the old library. Report unresolved or unsupported references explicitly; no substitute assets. Rebuild indexes only in the test/destination copy.
+6. **Round-trip validation and evidence UI/report.** Load/save/reopen copies with the app's own serializers and compare expected song semantics. Compare reference renders under the same format/quality/content where practical. Confirm settings persistence after restart, bank playback and unreferenced library file hashes. A ZIP CRC check alone cannot establish completeness.
+7. **Release/device gate.** Persistent original or separately approved new lineage key plus package/certificate/version/ABI verification. A private test process and reviewed device evidence are needed before clearing the public distribution hold; metadata checks do not automatically perform that gate.
+
+No package-ID change or migration release is approved here. A side-by-side successor would require explicit approval and separate provider/storage identities; it is a separate app, not an in-place update. A spare device is the safest first restoration target because it leaves the only current installation untouched.
+
+## Copy-only migration test protocol
+
+**Not executed on user data.** Await sanitized/noncritical copied fixtures and a spare device or controlled test environment. Never request the only originals or licensed banks for public upload.
+
+- **Three trees:** immutable source backup A; independent verified backup B; disposable restoration workspace C. Record file counts/relative paths/hashes for A and B before testing. Test tools/app may write only into C. Do not point test library/environment variables at the installed app, original project path or either backup tree.
+- **Fixture coverage:** small and dense `.flm` projects; nested/user and missing samples; unused recordings; sample edits/envelopes; presets/racks/drumsets with dependencies; SFZ includes; voicebank ZIP/UAR and folder imports with Japanese names/encoding and aliases; themes, supported settings and routing; alternate versions/recovery files. Use synthetic/owned fixtures first, no assumed bundled proprietary assets.
+- **Integrity:** compare source and destination raw asset hashes; compare serialized song content semantically after reopening a copy. Inventory every excluded/missing asset and unsupported setting. Restore with source paths unavailable in the disposable environment so the app cannot accidentally play from A/the old library. Do not rename or disconnect the original installation's files to simulate this.
+- **Failure safety:** corrupt/missing archive parts, modified checksums, disk-full, cancelled imports, killed staging process, duplicate names, traversal/symlink attacks, Unicode/case collisions, repeated restore. Verify A/B hashes unchanged; cancellation/failure must not promote partial destination state or erase earlier destination data.
+- **Device coverage:** ARMv7 and ARM64 (where available), representative Android scoped-storage/document providers, large banks and sample libraries. Record CPU/memory/UI responsiveness and preserve audio behavior; do not block the audio thread for backup work. Test that supported settings remain after restart and compare playback/render references.
+- **Pass evidence:** exact app/build and backup manifest hashes, device/ABI/Android, per-project/preset/bank results, settings before/after, missing-data report, failure/cancellation logs. Mark every untested item plainly. Keep all private content local; public results need no project or credential disclosure.
+
+## Recovery options still open
+
+- Owner/dev locates the matching original key on developer computers, offline backups, vaults, or unsearched/renamed archives; validate against the actual installed public certificate, not the displayed version alone.
+- If matching key is recovered, privately verify backup restoration and a compatible signed test build, then real consecutive in-place updates/data retention before distribution.
+- If it is not recovered, use only the old app's existing share/export capabilities plus accessible original assets/library copies to establish what can actually be preserved. Internal automatic settings transfer remains unproven/unavailable. Do not migrate if required data cannot be copied and validated safely.
+
+**No new downloadable APK is available.** Existing historic APKs are not safe signing-recovery updates. Playtest delivery remains conditional on a verified and owner-approved path.

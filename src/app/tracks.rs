@@ -281,7 +281,7 @@ impl BanaForgeApp {
                 let clips = &mut self.main_screen.clips;
                 let hidden = |r: &ClipRef| ch.zipped && r.channel == channel && r.lane > 0;
                 if clips.selected.as_ref().is_some_and(hidden) {
-                    *clips = Default::default();
+                    clips.clear_view();
                 }
                 clips.group.retain(|r| !hidden(r));
                 // The audio never reads it: an undo step with no rebuild.

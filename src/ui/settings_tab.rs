@@ -143,6 +143,8 @@ enum Kind {
     BufferSize,
     WaveformGap,
     McpPort,
+    AutoSaveInterval,
+    BarLineLimit,
     McpToken,
     McpStatus,
     /// A disabled toggle fixed in this state.
@@ -228,6 +230,7 @@ enum Choice {
     Orientation,
     /// `Project version size limit:` (#69), in MB ([`crate::settings::VERSION_SIZE_LIMITS`]).
     VersionSize,
+    BarLineVisibility,
 }
 
 /// `Screen orientation:`, after `Animation:` where the app can lock the screen's orientation
@@ -245,11 +248,12 @@ const fn row(label: &'static str, kind: Kind) -> Row {
 
 // Explicit platform inputs let host tests exercise mobile filtering too.
 fn platform_row_visible(r: &Row, desktop: bool, web: bool) -> bool {
-    !(web
-        && matches!(
-            r.kind,
-            Kind::Dropdown(Choice::SampleMemory) | Kind::AudioInput
-        ))
+    (!web
+        || (!matches!(r.label, "Auto-Save" | "Auto-Save interval:")
+            && !matches!(
+                r.kind,
+                Kind::Dropdown(Choice::SampleMemory) | Kind::AudioInput
+            )))
         && (desktop
             || (!matches!(r.kind, Kind::InstallSounds | Kind::BufferSize)
                 && !matches!(
@@ -260,7 +264,7 @@ fn platform_row_visible(r: &Row, desktop: bool, web: bool) -> bool {
 
 /// Every row of the SETTINGS tab, in order.
 // The raw buffer slider is desktop-only; mobile has one fewer settings row.
-const ROWS: [Row; 78 + cfg!(desktop) as usize] = {
+const ROWS: [Row; 83 + cfg!(desktop) as usize] = {
     use Kind::*;
     [
         row("MIDI:", Header),
@@ -313,7 +317,12 @@ const ROWS: [Row; 78 + cfg!(desktop) as usize] = {
             Toggle(|s| &mut s.show_information_buttons),
         ),
         row("Application:", Header),
+        row("Auto-Save", Toggle(|s| &mut s.auto_save)),
+        row("Auto-Save interval:", AutoSaveInterval),
         row("Edit:", Header),
+        row("Playlist grid:", Header),
+        row("Bar line display limit:", BarLineLimit),
+        row("Bar line visibility:", Dropdown(Choice::BarLineVisibility)),
         row(
             "Show Playlist envelopes",
             Toggle(|s| &mut s.envelope_display.visible),
@@ -976,6 +985,48 @@ impl SettingsTab {
                     None,
                 );
             }
+            Kind::AutoSaveInterval => {
+                label(ui, before(button_rect), FontSize::Pt10);
+                ui.put(
+                    button_rect,
+                    DragValue::new(&mut s.auto_save_interval_secs)
+                        .range(10..=86400)
+                        .custom_formatter(|n, _| format!("{}:{:02}", n as u32 / 60, n as u32 % 60))
+                        .custom_parser(|text| {
+                            if let Some((m, s)) = text.split_once(':') {
+                                let seconds = s.parse::<u32>().ok()?;
+                                (seconds < 60).then_some(
+                                    m.parse::<u32>()
+                                        .ok()?
+                                        .saturating_mul(60)
+                                        .saturating_add(seconds)
+                                        as f64,
+                                )
+                            } else {
+                                text.parse::<f64>().ok()
+                            }
+                        }),
+                );
+                crate::ui::tooltip::tip(
+                    ui,
+                    r,
+                    "Minutes:seconds, 0:10–1440:00. Auto-Save writes a separate recovery project in My Songs / Auto-saved projects, never over your manual save. A five-second warning precedes it; active edits and recording defer it.",
+                    None,
+                );
+            }
+            Kind::BarLineLimit => {
+                label(ui, before(button_rect), FontSize::Pt10);
+                ui.put(
+                    button_rect,
+                    DragValue::new(&mut s.playlist_bar_line_limit).range(1..=256),
+                );
+                crate::ui::tooltip::tip(
+                    ui,
+                    r,
+                    "Maximum major bar lines shown across the visible Playlist timeline (1–256). Display only; does not change snapping, clip positions or timing.",
+                    None,
+                );
+            }
             Kind::McpPort => {
                 label(ui, before(button_rect), FontSize::Pt10);
                 let port = Rect::from_min_size(
@@ -1327,6 +1378,11 @@ impl Choice {
             Choice::VersionSize => (crate::settings::VERSION_SIZE_LIMITS.iter())
                 .map(|&mb| (mb as usize, format!("{mb} MB")))
                 .collect(),
+            Choice::BarLineVisibility => ["Adaptive", "Always"]
+                .into_iter()
+                .map(str::to_owned)
+                .enumerate()
+                .collect(),
         }
     }
 
@@ -1344,6 +1400,7 @@ impl Choice {
             Choice::SampleMemory => usize::from(s.sample_memory_limit),
             Choice::Orientation => usize::from(s.screen_orientation),
             Choice::VersionSize => s.version_size_limit as usize,
+            Choice::BarLineVisibility => usize::from(s.playlist_bar_visibility),
         }
     }
 
@@ -1368,6 +1425,7 @@ impl Choice {
             Choice::SampleMemory => s.sample_memory_limit = value as u8,
             Choice::Orientation => s.screen_orientation = value as u8,
             Choice::VersionSize => s.version_size_limit = value as u32,
+            Choice::BarLineVisibility => s.playlist_bar_visibility = value.min(1) as u8,
         }
     }
 
@@ -1573,7 +1631,12 @@ mod tests {
                 "Animation:",
                 "Show information buttons",
                 "Application:",
+                "Auto-Save",
+                "Auto-Save interval:",
                 "Edit:",
+                "Playlist grid:",
+                "Bar line display limit:",
+                "Bar line visibility:",
                 "Show Playlist envelopes",
                 "VOL / PAN colors",
                 "Piano Roll Note Style:",
@@ -1638,6 +1701,8 @@ mod tests {
                     | Kind::AudioInput
                     | Kind::FixedDropdown(_)
                     | Kind::Scaling
+                    | Kind::AutoSaveInterval
+                    | Kind::BarLineLimit
             );
             // Vocal workspace fixed informational selectors use their original unpunctuated labels.
             if !matches!(r.kind, Kind::FixedDropdown(_)) {
@@ -1703,6 +1768,8 @@ mod tests {
         assert_eq!(values(Choice::Theme), (0..9).collect::<Vec<_>>());
         assert_eq!(labels(Choice::Animation), ["Full", "Reduced", "Minimal"]);
         assert_eq!(values(Choice::Animation), [0, 1, 2]);
+        assert_eq!(labels(Choice::BarLineVisibility), ["Adaptive", "Always"]);
+        assert_eq!(values(Choice::BarLineVisibility), [0, 1]);
         // The buttons show the current item.
         let s = Settings::default();
         assert_eq!(
@@ -1716,7 +1783,7 @@ mod tests {
         assert_eq!(Choice::Theme.label(&s), "Classic Gray");
         assert_eq!(Choice::Animation.label(&s), "Full");
         let mut s = Settings::default();
-        for c in [Choice::Theme, Choice::Animation] {
+        for c in [Choice::Theme, Choice::Animation, Choice::BarLineVisibility] {
             let (value, label) = c.items()[1].clone();
             c.set(&mut s, value);
             assert_eq!(c.get(&s), value);
@@ -1975,6 +2042,7 @@ mod tests {
                         | Kind::AudioInput
                         | Kind::FixedDropdown(_)
                         | Kind::SignIn
+                        | Kind::BarLineLimit
                 )
             }) {
                 let control = rig.rect_of(row_id(index(r.label)));

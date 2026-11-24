@@ -1,0 +1,37 @@
+name: UI responsiveness profiling
+# Compare release timings; verify selection of unchanged externally followed notes.
+on:
+  push:
+    branches: ["arena/**"]
+    paths: [".github/workflows/ui-responsiveness.yml"]
+  workflow_dispatch:
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Build harness outside measurements
+        run: |
+          cargo test --release --lib ui_responsiveness_profile --no-run > /tmp/build.log 2>&1 || { tail -90 /tmp/build.log; exit 1; }
+      - name: UI regression tests
+        run: |
+          cargo test --release --lib ui::widgets::text::tests
+          cargo test --release --lib ui::piano_roll::tests
+      - name: Profile UI work and process resources
+        run: |
+          mkdir -p measurements
+          lscpu > measurements/host.txt
+          /usr/bin/time -v -o measurements/resources.txt cargo test --release --lib ui_responsiveness_profile -- --ignored --nocapture --test-threads=1 > measurements/profile.log 2>&1
+          grep PROFILE measurements/profile.log | while IFS= read -r line; do echo "::notice title=UI profile::$line"; done
+          cat measurements/resources.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-responsiveness-measurements
+          path: measurements

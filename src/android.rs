@@ -629,6 +629,16 @@ pub fn asset_bytes(path: &str, limit: usize) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// The Android application ID is also eframe's native persistence namespace: standalone must not reuse the old app's
+/// settings file even though both variants share Rust and Java package namespaces.
+const fn android_app_id() -> &'static str {
+    if cfg!(feature = "standalone-android") {
+        "dev.daijro.banaforge.standalone"
+    } else {
+        "dev.daijro.banaforge"
+    }
+}
+
 /// Called by android-activity's NativeActivity glue, on its app thread.
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
@@ -659,7 +669,7 @@ fn android_main(app: AndroidApp) {
     }
     let options = eframe::NativeOptions {
         android_app: Some(app),
-        viewport: eframe::egui::ViewportBuilder::default().with_app_id("dev.daijro.banaforge"),
+        viewport: eframe::egui::ViewportBuilder::default().with_app_id(android_app_id()),
         ..Default::default()
     };
     if let Err(err) = eframe::run_native(
@@ -677,6 +687,19 @@ fn android_main(app: AndroidApp) {
     crate::project_files::finish_leaving();
     *UI_WAKE.lock().unwrap_or_else(|err| err.into_inner()) = None;
     *ACTIVITY.lock().unwrap_or_else(|err| err.into_inner()) = None;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn native_persistence_namespace_matches_the_selected_android_application_id() {
+        let want = if cfg!(feature = "standalone-android") {
+            "dev.daijro.banaforge.standalone"
+        } else {
+            "dev.daijro.banaforge"
+        };
+        assert_eq!(super::android_app_id(), want);
+    }
 }
 
 /// Runs a JNI call while keeping the Activity alive via a global reference without holding the

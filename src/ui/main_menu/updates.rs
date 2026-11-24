@@ -52,6 +52,9 @@ const INSTALL: &str = if cfg!(target_os = "android") {
 
 /// What the check found, in a line.
 fn found(status: &Status) -> String {
+    if !update::apk_updates_enabled() {
+        return "Standalone app updates are managed separately.".into();
+    }
     match (&status.latest, &status.check_failed) {
         _ if status.checking => "Checking for updates...".into(),
         (_, Some(why)) => format!("Could not check for updates. {why}"),

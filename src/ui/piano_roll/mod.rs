@@ -1210,6 +1210,18 @@ impl PianoRoll {
         let events = self.clip(song).map_or(&[][..], |c| &c.events);
         if events != self.seen.as_slice() || self.selected.len() != events.len() {
             self.seen = events.to_vec();
+            self.note_end_prefix.clear();
+            self.seen_vocal_notes = self
+                .clip(song)
+                .map_or_else(Vec::new, |clip| clip.file.vocal_notes.clone());
+            self.selected = vec![false; events.len()];
+            // A dragged key stops; the change (an undo) has dealt with the edit.
+            if let Gesture::Edit(edit) = std::mem::take(&mut self.gesture) {
+                self.stop_sound(&edit, &mut actions);
+            }
+            self.graph_drag = None;
+        }
+        if self.note_end_prefix.len() != events.len() {
             let mut furthest = 0.0_f64;
             self.note_end_prefix = events
                 .iter()
@@ -1220,15 +1232,6 @@ impl PianoRoll {
                     furthest
                 })
                 .collect();
-            self.seen_vocal_notes = self
-                .clip(song)
-                .map_or_else(Vec::new, |clip| clip.file.vocal_notes.clone());
-            self.selected = vec![false; events.len()];
-            // A dragged key stops; the change (an undo) has dealt with the edit.
-            if let Gesture::Edit(edit) = std::mem::take(&mut self.gesture) {
-                self.stop_sound(&edit, &mut actions);
-            }
-            self.graph_drag = None;
         }
         let panel = match self.menu {
             Some(Menu::Generate(panel)) => Some(panel),
@@ -1629,6 +1632,10 @@ impl PianoRoll {
         let events = self.clip(song).map_or(&[][..], |c| &c.events);
         self.selected = crate::app::live::follow(&self.seen, &self.selected, events, Event::pos);
         self.seen = events.to_vec();
+        // `follow` accepts outside edits into `seen`; invalidate the old index
+        // even when the note count stayed the same. The normal show path can
+        // rebuild it without treating the accepted edit as a selection reset.
+        self.note_end_prefix.clear();
         self.seen_vocal_notes = self
             .clip(song)
             .map_or_else(Vec::new, |clip| clip.file.vocal_notes.clone());
@@ -2708,15 +2715,34 @@ impl PianoRoll {
         }
         let tints = graph_lane::hit_tints(colors, color, prop);
         let events = preview.unwrap_or_else(|| self.clip(song).map_or(&[][..], |c| &c.events));
+        // The stable event snapshot has the same sorted-start/prefix-end index as
+        // the note grid. Preview edits can be unsorted, so keep their full scan.
+        let visible =
+            if events == self.seen.as_slice() && self.note_end_prefix.len() == events.len() {
+                let left = g.tick(values.left() - 5.0 * px);
+                let right = g.tick(values.right() + px);
+                let end = events.partition_point(|event| f64::from(event.pos()) <= right);
+                let start = self.note_end_prefix.partition_point(|end| *end < left);
+                start.min(end)..end
+            } else {
+                0..events.len()
+            };
         for pass in [false, true] {
-            for (e, _) in events
+            for (e, _) in events[visible.clone()]
                 .iter()
-                .zip(&self.selected)
+                .zip(self.selected.iter().skip(visible.start))
                 .filter(|(_, s)| **s == pass)
             {
                 let Some((pos, len, key)) = note(e) else {
                     continue;
                 };
+                // Painter clipping alone still allocates offscreen stems/caps.
+                // Keep notes crossing either edge, including the minimum-width stem.
+                let x0 = m.round_px(g.x(pos));
+                let x1 = g.x(pos + len).max(x0 + px);
+                if x0 > values.right() || x1.max(x0 + 4.0 * px) < values.left() {
+                    continue;
+                }
                 let v = if let Some(expression) = expression {
                     let value = vocal_values
                         .get(&(pos as u32, key))
@@ -2728,8 +2754,6 @@ impl PianoRoll {
                 } else {
                     continue;
                 };
-                let x0 = m.round_px(g.x(pos));
-                let x1 = g.x(pos + len).max(x0 + px);
                 let from = match prop {
                     Prop::Pan => top - px + h / 2.0,
                     _ => bottom,

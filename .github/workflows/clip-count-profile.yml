@@ -1,0 +1,64 @@
+name: High clip count investigation
+on:
+  push:
+    branches: ['arena/**']
+    paths: ['.github/workflows/clip-count-profile.yml', 'src/ui/clips.rs', 'src/ui/clips/count_profile.rs', 'src/app/tests/count_profile.rs']
+  workflow_dispatch:
+    inputs:
+      test_filter:
+        description: Rust test name filter (defaults to the complete clip-count profile)
+        required: false
+        default: high_clip_count_
+        type: string
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TEST_FILTER: ${{ github.event.inputs.test_filter || 'high_clip_count_' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Build attribution harness outside measurements
+        run: |
+          mkdir -p measurements
+          rustfmt --edition 2024 src/ui/clips.rs src/ui/clips/count_profile.rs src/app/tests/count_profile.rs
+          cargo test --release --lib "$TEST_FILTER" --no-run > measurements/build.log 2>&1 || { tail -100 measurements/build.log; exit 1; }
+      - name: Measure production helpers and offline engine
+        run: |
+          lscpu > measurements/host.txt
+          set +e
+          RUST_BACKTRACE=1 /usr/bin/time -v -o measurements/resources.txt cargo test --release --lib "$TEST_FILTER" -- --ignored --nocapture --test-threads=1 > measurements/profile.log 2>&1
+          code=$?
+          set -e
+          if [ -s measurements/profile.log ]; then python3 tools/analyze-clip-count-profile.py measurements/profile.log measurements || true; fi
+          if [ -f measurements/REPORT.md ]; then cat measurements/REPORT.md >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f measurements/summary.json ]; then
+            python3 - <<'PYREAD'
+          import pathlib, json, zlib, base64
+          root=pathlib.Path('measurements')
+          payload={'summary.json':(root/'summary.json').read_text(),'resources.txt':(root/'resources.txt').read_text()}
+          packed=base64.b64encode(zlib.compress(json.dumps(payload).encode(),9)).decode()
+          for i in range(0,len(packed),3000):
+              print(f'::notice title=clip-profile-data-{i:08}::{packed[i:i+3000]}')
+          PYREAD
+          fi
+          if [ "$code" -ne 0 ]; then
+            echo "::error::cargo test exited $code; last profile.log lines follow"
+            tail -40 measurements/profile.log | sed 's/^/::error::/' | head -40
+            exit "$code"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clip-count-investigation
+          path: measurements
+          retention-days: 30

@@ -50,6 +50,7 @@ mod midi;
 pub(crate) mod note_record;
 mod panel;
 mod plugins;
+mod project_autosave;
 mod tracks;
 mod typed;
 mod versions;
@@ -203,6 +204,7 @@ pub struct BanaForgeApp {
     quitting: bool,
     /// The flash shown (`Saved!`), and when it showed.
     flash: Option<(String, f64)>,
+    project_autosave: project_autosave::AutoSaver,
     /// The view the last frame started with: a roll that goes ends its new note's sound ([`Self::left_view`]).
     shown: View,
     /// Preview (the editors' transport toggle): the clip the engine plays alone while it is on.
@@ -331,6 +333,7 @@ impl Default for BanaForgeApp {
             params_moved: false,
             quitting: false,
             flash: None,
+            project_autosave: Default::default(),
             preview: None,
             sent_loop: None,
             song_length: None,
@@ -742,6 +745,7 @@ impl BanaForgeApp {
             }
             SongEdit::Restored => self.restore_version(tick),
             SongEdit::Replaced => {
+                self.project_autosave.reset_project();
                 // A new song counts from its own first action, and no slider drag of the old one goes on.
                 (self.last_action, self.row_drag) = (None, false);
                 // Its view zooms per U, for its history and engine too.
@@ -781,7 +785,7 @@ impl BanaForgeApp {
                 let editor = &mut self.slots.drum_editor;
                 (editor.step.fold, editor.grid.fold) = folds;
                 // The clip selection, the timeline's scroll and the ruler's gesture belong to the old song too.
-                self.main_screen.clips = Default::default();
+                self.main_screen.clips.project_replaced();
                 self.main_screen.cancel_hold();
                 self.main_screen.region = Default::default();
                 self.main_screen.scroll_x = 0.0;
@@ -2147,6 +2151,8 @@ impl BanaForgeApp {
         self.files.keep_recent(&self.song, f64::INFINITY, true);
         #[cfg(not(target_arch = "wasm32"))]
         self.files.join_autosave();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.project_autosave.finish();
         #[cfg(target_os = "android")]
         {
             self.screen_kept_on = false;
@@ -2918,6 +2924,7 @@ impl BanaForgeApp {
         self.file_drop(ctx, &metrics, tick);
         self.quit(ctx);
         self.flash(ctx, &metrics);
+        self.project_autosave(ctx, &metrics);
         if self.current_channel() != was_current {
             self.rack_follows(ctx);
         }
@@ -3032,6 +3039,8 @@ mod tests {
     use crate::ui::views::{MenuTab, Overlay};
     use eframe::egui::{Pos2, pos2, vec2};
 
+    #[cfg(target_os = "linux")]
+    mod count_profile;
     mod audio_edit;
     mod automation;
     mod automation_editor;

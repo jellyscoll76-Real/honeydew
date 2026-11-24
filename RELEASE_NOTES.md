@@ -1,3 +1,32 @@
+BanaForge 0.5.33 — update-signing safeguards (not released: original signing key required)
+
+- Audit confirms delivered v0.5.31 and v0.5.32 have the same package and increasing version codes, but different signing certificates. The former playtest workflow generated disposable release keys when signing secrets were absent; those APKs cannot update each other in place.
+- Remove release-key generation fallback. Both CI release paths and local distribution enforce the pinned signer, stable application ID, Cargo version and native ABI policy. Validate existing keys without exposing credentials through step outputs. Missing/wrong keys block APK publication instead of producing another incompatible build.
+- Add predecessor-APK comparison and public identity reporting, version-code bounds and regression coverage. No project/settings storage, permissions, data migration or audio code changes.
+- No in-place installation/data-retention tests or fixed APK are claimed while the original private key is unavailable. See ANDROID_UPDATE_SAFETY.md. Do not uninstall an existing installation to bypass a signature error.
+
+BanaForge 0.5.32 — cross-project clipboard and lane action touch polish
+
+- Retain owned playlist clip snapshots when switching projects. Cross-project audio, note-pattern and drum-pattern pastes find existing compatible lanes nearest their source playlist position, independently of the vertical cursor. No tracks/racks/instruments are created or replaced; unmatched clips are skipped. Drum racks must already contain the referenced pad slots. Same-project paste placement remains unchanged.
+- Append fresh-ID clip copies with original events, loop/trim/offset, sample references/settings, envelopes and per-clip metadata; allow audio overlap. Copied content survives repeated project switches, deselection and target track rekeys. Cross-project automation is skipped rather than accidentally binding source-project module IDs to unrelated controls.
+- Playlist Copy gives immediate snapshot plus brief pressed/release feedback, then dismisses the temporary lane toolbar. Reopening restores every action. Slightly larger bubbles and padded, non-overlapping touch cells apply to all six lane actions; narrow layouts wrap instead of hiding the menu. Other editors retain their previous toolbar dimensions and operations.
+- Add clipboard/project-load/undo, routing/overlap/data-invariance and touch-feedback/layout regressions. Existing session note/hit/module clipboards and audio engine behavior are retained. Physical Android touch comfort and playback checks remain playtest acceptance items; see CROSS_PROJECT_CLIPBOARD_TESTING.md.
+
+BanaForge 0.5.31 — measured UI responsiveness pass
+
+- Profile the release UI harness before changing rendering. Replace quadratic long-label truncation with linear width maintenance: the isolated 8,192-character Unicode case fell from about 27.06 ms to 0.016 ms on CI. Preserve existing ellipsis/Unicode behavior.
+- Piano Roll graph stems/caps use the existing viewport index, retain edge-crossing notes and skip offscreen shape work. Preview edits retain the safe full scan. Fix stale viewport indexes after accepted same-count external edits without changing selection-follow semantics.
+- Add repeatable 1k/10k/50k-note and long-label profiling, release editor/text regressions and external-edit cache coverage. Detailed timings and physical-device acceptance checklist are in UI_RESPONSIVENESS_TESTING.md.
+- Audio processing, buffer/latency settings, MIDI scheduling and sound quality are unchanged. Headless CI timings are not Android FPS or touch-latency measurements; device frame pacing, playback/edit load and long-session testing remain required. Auto-Save defaults/behavior are retained.
+
+BanaForge 0.5.30 — opt-in interval Auto-Save
+
+- Auto-Save defaults OFF; interval defaults to 5:00 and can be entered as minutes:seconds (0:10–1440:00) in Settings → Application.
+- A non-interactive top banner counts down a full five seconds before a recovery project is saved. Late frames do not skip the warning. Disable or change interval to cancel/restart the pending timer; changing projects resets it.
+- Recovery projects go to My Songs / Auto-saved projects in a unique session/project folder. They never overwrite a manual save, rename the current project, clear unsaved changes, add undo steps or send audio commands. Untitled projects are protected too. Existing recent-session crash recovery remains separate and unchanged.
+- Encode and atomic temporary-file/write/sync/rename run on a single background worker. Snapshot/plugin-state capture uses the existing UI-thread save snapshot path. Active touches, parameter edits, recording and app overlays defer the scheduled snapshot; ordinary playback continues. An already-started write finishes safely if disabled.
+- Reports save failures rather than claiming success. Browser sessions without disk storage do not expose the feature. Physical Android timing and heavy-project responsiveness remain acceptance tests, not guarantees.
+
 BanaForge 0.5.29 — Android ARMv7 / ARM64 compatibility delivery
 
 - Ship a universal playtest APK containing actual `armeabi-v7a` and `arm64-v8a` native engines and matching C++ runtimes. Existing per-ABI builds remain selectable; previous playtest artifacts were explicitly ARM64-only.

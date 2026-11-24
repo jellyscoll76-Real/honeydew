@@ -21,7 +21,6 @@ use crate::ui::automation::value::time_items;
 use crate::ui::buttons::{filled_circle_button, floating_button, gradient};
 use crate::ui::clips::{Clips, LiveTake, TimeAxis, grid_ticks, song_end_beats};
 use crate::ui::ctrl_menu::Touch;
-use crate::ui::drum_grid::edit::{MARK_GAP, grid_lines};
 use crate::ui::focus;
 use crate::ui::keyboard_settings::{
     KeyboardMode, PANEL_H, keys_rect, knob_rects, panel_target, panel_tick, piano_rect, strip_rect,
@@ -29,7 +28,7 @@ use crate::ui::keyboard_settings::{
 };
 use crate::ui::mini_mixer::{self, RowKind};
 use crate::ui::panel_resize::{self, PanelGrab, Sizes, Zone};
-use crate::ui::piano_roll::notes::{GridSize, Snap};
+use crate::ui::piano_roll::notes::Snap;
 use crate::ui::preview::ClipKey;
 use crate::ui::region::{self, TimeRange};
 use crate::ui::sample_row;
@@ -684,7 +683,13 @@ impl MainScreen {
             grid.left(),
             &shown,
             axis,
-            (app.song.time_sig, row_h, current, self.snap.size),
+            (
+                app.song.time_sig,
+                row_h,
+                current,
+                settings.playlist_bar_line_limit,
+                settings.playlist_bar_visibility == 1,
+            ),
             &cx,
         );
         crate::ui::sections::tint(ui, grid, &shown, row_h, axis, &app.song.sections, &cx);
@@ -2458,20 +2463,67 @@ fn open_panel_button(
     response
 }
 
-/// Paints `rect` in `background`, then the lanes of `tracks`, each from its top edge, in order (rows above or below the
-/// rect are clipped by the painter, so a scrolled caller passes just the visible rows), with the beat grid of `axis`
-/// from `grid_left` on. The header column left of it is [`mini_mixer::show`]'s. Each row is filled from the grid's left
-/// edge (or beat 0's x when scrolled before it) to its right edge, a device pixel short of the next row, in
-/// `moduleFill` for the `current` track and `controlFill` for the others; the beat lines over them are `background`,
-/// 4 px at bars, 2 px at beats and 1 px finer, centred, at least 0.6 U apart (the drum free grid's
-/// [`marks`](crate::ui::drum_grid::edit::marks)), or at the grid `size` ([`grid_lines`], #53).
+/// Playlist-only visual grid. Bar lines are independent of the musical snap grid: Adaptive hides them when one bar
+/// is narrower than 1 U, while Always retains them; either mode decimates the visible range to the user's line budget.
+/// Beat lines appear only when a beat has room to read. No subdivisions are drawn here; editing and snapping remain
+/// unchanged.
+fn playlist_grid_lines(
+    t0: f64,
+    t1: f64,
+    beat_w: f32,
+    u: f32,
+    sig: TimeSig,
+    max_bars: u16,
+    always: bool,
+) -> Vec<(f64, f32)> {
+    if !beat_w.is_finite() || beat_w <= 0.0 || !t0.is_finite() || !t1.is_finite() || t1 < t0 {
+        return Vec::new();
+    }
+    let bar_ticks = f64::from(PPQ) * f64::from(sig.bar_beats());
+    let first = (t0.max(0.0) / bar_ticks).ceil() as i64;
+    let last = (t1 / bar_ticks).floor() as i64;
+    if last < first {
+        return Vec::new();
+    }
+    let count = (last - first + 1) as u64;
+    let stride = count.div_ceil(u64::from(max_bars.clamp(1, 256))) as i64;
+    let mut lines = Vec::with_capacity(max_bars as usize + 32);
+    if always || beat_w * sig.bar_beats() as f32 >= u {
+        let mut bar = first;
+        let rem = bar.rem_euclid(stride);
+        if rem != 0 {
+            bar += stride - rem;
+        }
+        while bar <= last {
+            lines.push((bar as f64 * bar_ticks, 4.0));
+            bar += stride;
+        }
+    }
+    // Beat lines are secondary, and only shown when they have at least 0.6 U of separation.
+    if beat_w >= 0.6 * u {
+        let first_beat = (t0.max(0.0) / f64::from(PPQ)).ceil() as i64;
+        let last_beat = (t1 / f64::from(PPQ)).floor() as i64;
+        for beat in first_beat..=last_beat {
+            if beat.rem_euclid(i64::from(sig.bar_beats())) == 0 {
+                continue;
+            }
+            lines.push((beat as f64 * f64::from(PPQ), 2.0));
+        }
+    }
+    lines.sort_by(|a, b| a.0.total_cmp(&b.0));
+    lines
+}
+
+/// Paints `rect` in `background`, then the lanes of `tracks`. Major Playlist bar lines are a visual-only grid
+/// governed by the persisted display limit and visibility policy; beat lines are secondary. Neither affects snap,
+/// clip positions, MIDI data or project structure.
 fn paint_track_rows(
     painter: &Painter,
     rect: Rect,
     grid_left: f32,
     tracks: &[(TrackRow, f32)],
     axis: TimeAxis,
-    (sig, row_h, current, size): (TimeSig, f32, Option<(usize, usize)>, GridSize),
+    (sig, row_h, current, bar_limit, always_bars): (TimeSig, f32, Option<(usize, usize)>, u16, bool),
     cx: &UiCtx,
 ) {
     let UiCtx { theme, m } = *cx;
@@ -2481,13 +2533,14 @@ fn paint_track_rows(
     let grid = rect.with_min_x(grid_left);
     let px = 1.0 / m.ppp();
     let (t0, t1) = (axis.tick(grid.left()), axis.tick(grid.right()));
-    let lines: Vec<(f32, f32)> = grid_lines(t0, t1, axis.beat_w, m.u(1.0), sig, MARK_GAP, size)
-        .into_iter()
-        .map(|(tick, w)| (m.round_px(axis.x(tick)) - (w / 2.0).floor() * px, w * px))
-        .collect();
+    let lines: Vec<(f32, f32)> = playlist_grid_lines(
+        t0, t1, axis.beat_w, m.u(1.0), sig, bar_limit, always_bars,
+    )
+    .into_iter()
+    .map(|(tick, w)| (m.round_px(axis.x(tick)) - (w / 2.0).floor() * px, w * px))
+    .collect();
     let grid_painter = painter.with_clip_rect(painter.clip_rect().intersect(grid));
     for &(ref track, top) in tracks {
-        // A 1-px `background` gap under each row.
         let lane = Rect::from_x_y_ranges(grid.x_range(), top..=top + row_h * track.rows() - px);
         let fill = match current == Some((track.channel, track.lane)) {
             true => c.module_fill,
@@ -3680,10 +3733,28 @@ mod tests {
     }
 
     #[test]
-    fn the_rows_beat_lines_are_background_4_2_1_px_centred_on_marks_at_least_0_6_u_apart() {
-        // 38.4 points a beat at U 32: half beats are 19.2 apart, 0.6 U, and quarters would be closer. Bars 4 px, beats
-        // 2 px, half beats 1 px, each ⌊w/2⌋ px left of its mark rounded to the pixel grid. Drums' row (y TOP + 64, 63
-        // tall).
+    fn playlist_bar_lines_obey_the_budget_and_adaptive_visibility_at_extreme_zooms() {
+        let sig = TimeSig::default();
+        // A very wide view (many bars) stays within the requested line budget.
+        let wide = playlist_grid_lines(0.0, 400.0 * f64::from(PPQ), 0.2, 32.0, sig, 24, true);
+        let bars = wide.iter().filter(|(_, width)| *width == 4.0).count();
+        assert!(bars <= 24 && bars > 0);
+        // At a tiny zoom, Adaptive suppresses major bars; Always retains a capped, decimated set.
+        let adaptive = playlist_grid_lines(0.0, 64.0 * f64::from(PPQ), 0.1, 32.0, sig, 24, false);
+        let always = playlist_grid_lines(0.0, 64.0 * f64::from(PPQ), 0.1, 32.0, sig, 24, true);
+        assert_eq!(adaptive.iter().filter(|(_, w)| *w == 4.0).count(), 0);
+        assert!(always.iter().filter(|(_, w)| *w == 4.0).count() <= 24);
+        // At a close zoom, each bar and beat has its own distinct width; no snap subdivisions appear.
+        let close = playlist_grid_lines(0.0, 16.0 * f64::from(PPQ), 48.0, 32.0, sig, 24, false);
+        assert!(close.iter().any(|(_, w)| *w == 4.0));
+        assert!(close.iter().any(|(_, w)| *w == 2.0));
+        assert!(close.iter().all(|(_, w)| *w == 2.0 || *w == 4.0));
+    }
+
+    #[test]
+    fn the_rows_show_distinct_major_bars_and_secondary_beats_at_both_pixel_densities() {
+        // 38.4 points a beat at U 32: the Playlist shows major bars (4 px) and readable beats (2 px), not snap-derived
+        // half/quarter subdivisions. Check the same line counts at both device pixel densities.
         let mut rig = Rig::new(song_with_a_clip());
         let f = rig.frame(vec![]);
         let bg = theme_by_id(0).colors.background.to_color32();
@@ -3700,18 +3771,9 @@ mod tests {
             })
             .collect();
         lines.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let want = [
-            (48.0, 4.0),
-            (69.0, 1.0),
-            (87.0, 2.0),
-            (108.0, 1.0),
-            (126.0, 2.0),
-            (146.0, 1.0),
-            (164.0, 2.0),
-            (184.0, 1.0),
-            (202.0, 4.0),
-        ];
-        assert_eq!(lines[..9], want);
+        assert_eq!(lines.len(), 30);
+        assert_eq!(lines.iter().filter(|(_, width)| *width == 4.0).count(), 8);
+        assert_eq!(lines.iter().filter(|(_, width)| *width == 2.0).count(), 22);
         // At ppp 2 the same marks in half-point pixels: w px wide, ⌊w/2⌋ px left of the mark on the half-point grid.
         let m = Metrics::from_pixels_per_point(2.0, DEFAULT_UI_SCALE);
         let theme = theme_by_id(0);
@@ -3728,7 +3790,7 @@ mod tests {
             beat_w: BEAT_PT,
         };
         let rect = Rect::from_min_max(pos2(0.0, 48.0), pos2(1170.0, 380.0));
-        let rows = (TimeSig::default(), 64.0, None, GridSize::Auto);
+        let rows = (TimeSig::default(), 64.0, None, 24, false);
         let out = egui::Context::default().run(egui::RawInput::default(), |ctx| {
             let panel = egui::CentralPanel::default().frame(egui::Frame::NONE);
             panel.show(ctx, |ui| {
@@ -3746,18 +3808,9 @@ mod tests {
             })
             .collect();
         lines.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let want = [
-            (47.0, 2.0),
-            (67.0, 0.5),
-            (86.0, 1.0),
-            (105.5, 0.5),
-            (124.5, 1.0),
-            (144.0, 0.5),
-            (162.5, 1.0),
-            (182.5, 0.5),
-            (200.5, 2.0),
-        ];
-        assert_eq!(lines[..9], want);
+        assert_eq!(lines.len(), 30);
+        assert_eq!(lines.iter().filter(|(_, width)| *width == 2.0).count(), 8);
+        assert_eq!(lines.iter().filter(|(_, width)| *width == 1.0).count(), 22);
     }
 
     /// The light outlines (a stroke t + 1 px = 3 px wide on its middle) the frame drew.
@@ -3793,6 +3846,8 @@ mod tests {
         rig.click(CLIP);
         let synth = lit([203.0, 357.0], 2.0);
         assert_eq!(outlines(&rig.frame(vec![])), [synth]);
+        // Dismiss the larger action row before targeting the clip beneath it.
+        rig.screen.clips.row.hide();
         // A long press selects the Drums clip with its handles; the current clip stays the only one outlined.
         rig.long_press(pos2(120.0, 144.0));
         let drums = ClipRef {
@@ -4939,6 +4994,8 @@ mod tests {
         // The drum clip selected; the second finger lands while the first holds the synth clip.
         rig.long_press(pos2(CLIP.x, 144.0));
         assert_eq!(rig.screen.clips.selected, Some(DRUM_CLIP));
+        // This tests the grid pinch, not the enlarged toolbar over the next row.
+        rig.screen.clips.row.hide();
         let other = CLIP + vec2(300.0, 0.0);
         rig.frame(vec![egui::Event::PointerMoved(CLIP)]);
         rig.frame(finger(1, Start, CLIP));
@@ -5196,6 +5253,12 @@ mod tests {
         rig.frame(vec![]);
         assert_eq!(rig.click_id(button(0)).0, None);
         assert_eq!(rig.clips(2).len(), 1);
+        // Copy flashes then dismisses; reopening retains all actions.
+        rig.frame(vec![]);
+        rig.frame(vec![]);
+        assert!(!rig.screen.clips.row.showing());
+        rig.screen.clips.row.select_all();
+        rig.frame(vec![]);
         assert_eq!(rig.click_id(button(1)).0, Some(SongEdit::Final));
         let starts: Vec<_> = rig.clips(2).iter().map(|c| (c.id, c.start_tick)).collect();
         assert_eq!(starts, [(1, 512), (2, 1024)]);

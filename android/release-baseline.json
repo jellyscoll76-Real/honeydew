@@ -1,0 +1,10 @@
+{
+  "package": "dev.daijro.banaforge",
+  "version_name": "0.5.32",
+  "version_code": 5032,
+  "certificate_sha256": "2bf9dc969005467362dd2f9a80d4d43e62c2ac368c718ba78f9ce23de6eca126",
+  "abis": ["arm64-v8a", "armeabi-v7a"],
+  "source_run": 45012769205,
+  "audit_run": 45033530505,
+  "private_key_available": false
+}
