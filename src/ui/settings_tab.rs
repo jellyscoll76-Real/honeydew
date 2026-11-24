@@ -336,12 +336,6 @@ const ROWS: [Row; 81 + cfg!(desktop) as usize] = {
             Toggle(|s| &mut s.show_information_buttons),
         ),
         row("Edit:", Header),
-        row("Timeline Grid / Bar Lines:", Header),
-        row("Maximum visible bar lines", BarLineLimit),
-        row(
-            "Keep bar lines visible at every zoom level",
-            Toggle(|s| &mut s.playlist_bar_lines_always_visible),
-        ),
         row(
             "Show Playlist envelopes",
             Toggle(|s| &mut s.envelope_display.visible),
@@ -764,7 +758,7 @@ impl SettingsTab {
     ) {
         let (m, colors) = (cx.m, &cx.theme.colors);
         if let Some(topic) = crate::ui::help::setting(row.label) {
-            let rect = row_help_rect(slot, m);
+            let rect = row_help_rect(slot, *m);
             crate::ui::help::button_sized(ui, rect.min, topic, rect.width());
         }
         // Headers and the metronome row take the whole slot; the other rows are a control row, centred in it.
