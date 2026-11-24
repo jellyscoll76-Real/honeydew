@@ -815,6 +815,7 @@ impl MainScreen {
             multitrack: settings.multitrack_recording,
             activity: settings.track_activity_indicators,
             activity_colors: settings.track_activity_colors,
+            activity_style: settings.track_activity_style,
             meters: audio
                 .filter(|s| !s.stream_failed)
                 .map(|s| &s.module_meters[..]),

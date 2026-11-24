@@ -254,6 +254,9 @@ pub struct Settings {
     /// Visual only: use each channel color rather than white for activity.
     #[serde(rename = "trackActivityColors")]
     pub track_activity_colors: bool,
+    /// Visual-only shape of Playlist activity lights; defaults to the existing square.
+    #[serde(rename = "trackActivityStyle")]
+    pub track_activity_style: crate::ui::mini_mixer::ActivityStyle,
     /// `Show hidden tracks` (our own key): the playlist shows the tracks `Hide track` hid, dimmed. Off by default.
     #[serde(rename = "showHiddenTracks")]
     pub show_hidden_tracks: bool,
@@ -460,6 +463,7 @@ impl Default for Settings {
             playlist_bar_lines_always_visible: true,
             track_activity_indicators: false,
             track_activity_colors: false,
+            track_activity_style: crate::ui::mini_mixer::ActivityStyle::DefaultSquare,
             show_hidden_tracks: false,
             hardware_meters: true,
             lock_pads: true,
@@ -1363,6 +1367,7 @@ mod tests {
                 "theme",
                 "trackActivityColors",
                 "trackActivityIndicators",
+                "trackActivityStyle",
                 "uiscalefactor",
                 "vocalSynth.browserVisible",
                 "vocalSynth.desktopWorkspace",
@@ -1700,14 +1705,23 @@ mod tests {
 #[cfg(test)]
 mod playlist_activity_settings_regressions {
     use super::*;
+    use crate::ui::mini_mixer::ActivityStyle;
+
     #[test]
-    fn layout_regression_activity_colors_default_white_and_persist_independently() {
+    fn activity_design_defaults_to_square_and_all_styles_persist_independently() {
         let mut s: Settings = serde_json::from_str("{}").unwrap();
         assert!(!s.track_activity_colors);
+        assert_eq!(s.track_activity_style, ActivityStyle::DefaultSquare);
         s.track_activity_colors = true;
-        let loaded: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
-        assert!(loaded.track_activity_colors);
-        assert!(!loaded.track_activity_indicators);
+        for style in ActivityStyle::ALL {
+            s.track_activity_style = style;
+            let json = serde_json::to_string(&s).unwrap();
+            assert!(json.contains("trackActivityStyle"));
+            let loaded: Settings = serde_json::from_str(&json).unwrap();
+            assert!(loaded.track_activity_colors);
+            assert!(!loaded.track_activity_indicators);
+            assert_eq!(loaded.track_activity_style, style);
+        }
     }
 }
 

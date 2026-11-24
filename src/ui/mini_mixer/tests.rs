@@ -194,6 +194,7 @@ impl Rig {
         let col = Column {
             activity: false,
             activity_colors: false,
+            activity_style: ActivityStyle::DefaultSquare,
             left: 0.0,
             width: self.width(),
             expanded: self.expanded,

@@ -219,6 +219,7 @@ enum Choice {
     SoundMode,
     WaveformQuality,
     NoteStyle,
+    ActivityIndicator,
     Theme,
     /// `Animation`: `Full`, `Reduced` (no animations) or `Minimal` (no scroll inertia either).
     Animation,
@@ -283,7 +284,7 @@ fn platform_row_visible(r: &Row, desktop: bool, web: bool) -> bool {
 
 /// Every row of the SETTINGS tab, in order.
 // The raw buffer slider is desktop-only; mobile has one fewer settings row.
-const ROWS: [Row; 81 + cfg!(desktop) as usize] = {
+const ROWS: [Row; 82 + cfg!(desktop) as usize] = {
     use Kind::*;
     [
         row("MIDI:", Header),
@@ -360,6 +361,10 @@ const ROWS: [Row; 81 + cfg!(desktop) as usize] = {
         row(
             "Track activity indicators",
             Toggle(|s| &mut s.track_activity_indicators),
+        ),
+        row(
+            "Track activity indicator design:",
+            Dropdown(Choice::ActivityIndicator),
         ),
         row(
             "Match activity indicators to track color",
@@ -1399,6 +1404,11 @@ impl Choice {
                 .enumerate()
                 .map(|(i, q)| (i, q.label().to_owned()))
                 .collect(),
+            Choice::ActivityIndicator => crate::ui::mini_mixer::ActivityStyle::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(i, style)| (i, style.label().to_owned()))
+                .collect(),
             Choice::SoundMode => SOUND_MODES
                 .iter()
                 .map(|&(id, label)| (usize::from(id), label.to_owned()))
@@ -1432,6 +1442,10 @@ impl Choice {
             Choice::SoundMode => usize::from(s.sound_mode),
             Choice::WaveformQuality => s.waveform_quality as usize,
             Choice::NoteStyle => s.piano_roll_note_style as usize,
+            Choice::ActivityIndicator => crate::ui::mini_mixer::ActivityStyle::ALL
+                .iter()
+                .position(|&style| style == s.track_activity_style)
+                .unwrap_or(1),
             // A theme of the user's is no built-in one.
             Choice::Theme if !s.custom_theme.is_empty() => usize::MAX,
             Choice::Theme => s.theme as usize,
@@ -1455,6 +1469,12 @@ impl Choice {
             }
             Choice::WaveformQuality => {
                 s.waveform_quality = crate::ui::waveform_quality::WaveformQuality::ALL
+                    .get(value)
+                    .copied()
+                    .unwrap_or_default()
+            }
+            Choice::ActivityIndicator => {
+                s.track_activity_style = crate::ui::mini_mixer::ActivityStyle::ALL
                     .get(value)
                     .copied()
                     .unwrap_or_default()
@@ -1682,6 +1702,7 @@ mod tests {
                 "Keyboard in pickers",
                 "Continuous scrolling during playback",
                 "Track activity indicators",
+                "Track activity indicator design:",
                 "Match activity indicators to track color",
                 "Show hidden tracks",
                 "Timeline Grid / Bar Lines:",
@@ -1922,6 +1943,45 @@ mod tests {
                 .enumerate()
                 .all(|(row, i)| i.row == row && i.col == 0)
         );
+    }
+
+    #[test]
+    fn activity_indicator_design_offers_five_styles_marks_and_stores_the_pick() {
+        use crate::ui::mini_mixer::ActivityStyle;
+
+        let mut rig = Rig::new();
+        assert_eq!(rig.settings.track_activity_style, ActivityStyle::DefaultSquare);
+        rig.click_row("Track activity indicator design:");
+        let items = popup_items(
+            Menu::Choice(Choice::ActivityIndicator),
+            &rig.settings,
+            &[],
+            &[],
+        );
+        assert_eq!(
+            items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>(),
+            [
+                "Small Pill (OG)",
+                "Default Square",
+                "FLM Rectangle",
+                "Triangle",
+                "Three Circles",
+            ]
+        );
+        assert_eq!(
+            items
+                .iter()
+                .filter(|item| item.current)
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Default Square"]
+        );
+        // Picking a style changes only presentation; the existing activity toggle stays untouched.
+        let triangle = rig.rect_of(popup_id().with((0_usize, 3_usize))).center();
+        rig.click(triangle);
+        assert_eq!(rig.settings.track_activity_style, ActivityStyle::Triangle);
+        assert!(!rig.settings.track_activity_indicators);
+        assert!(rig.take_changed());
     }
 
     // Offscreen: the tab in a real context, driven by synthetic pointer events.

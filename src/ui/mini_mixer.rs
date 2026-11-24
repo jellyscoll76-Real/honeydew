@@ -24,7 +24,8 @@
 //! nor labels); the expanded meters are drawn under the level slider, the left peak on the lower bar.
 
 use banaforge_audio::device::ModuleMeter;
-use eframe::egui::{Align2, Color32, Id, Rect, Shape, Stroke, Ui, UiBuilder, pos2, vec2};
+use eframe::egui::{Align2, Color32, Id, Painter, Rect, Shape, Stroke, Ui, UiBuilder, pos2, vec2};
+use serde::{Deserialize, Serialize};
 
 use crate::icons::{draw_icon, icon_edge};
 use crate::metrics::{FontSize, Metrics};
@@ -73,6 +74,83 @@ const PRESSED_GROWTH: f32 = 1.05;
 const METER_INSET: f32 = 0.5;
 const METER_BOTTOM: f32 = 0.25;
 const METER_SHARE: f32 = 1.0 / 8.0;
+
+/// The visual-only shape used for the Playlist's output activity light.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActivityStyle {
+    SmallPill,
+    #[default]
+    DefaultSquare,
+    FlmRectangle,
+    Triangle,
+    ThreeCircles,
+}
+
+impl ActivityStyle {
+    pub const ALL: [Self; 5] = [
+        Self::SmallPill,
+        Self::DefaultSquare,
+        Self::FlmRectangle,
+        Self::Triangle,
+        Self::ThreeCircles,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SmallPill => "Small Pill (OG)",
+            Self::DefaultSquare => "Default Square",
+            Self::FlmRectangle => "FLM Rectangle",
+            Self::Triangle => "Triangle",
+            Self::ThreeCircles => "Three Circles",
+        }
+    }
+
+    /// Paints one style inside the same bounded activity area; intensity and color are supplied by the existing meter.
+    fn paint(self, painter: &Painter, area: Rect, color: Color32, m: &Metrics) {
+        match self {
+            Self::SmallPill => {
+                let pill = Rect::from_center_size(
+                    area.center(),
+                    vec2(area.width() * 0.42, area.height() * 0.72),
+                );
+                painter.rect_filled(pill, pill.width() * 0.5, color);
+            }
+            Self::DefaultSquare => painter.rect_filled(area, m.u(0.06), color),
+            Self::FlmRectangle => {
+                let rectangle = Rect::from_center_size(
+                    area.center(),
+                    vec2(area.width() * 0.48, area.height()),
+                );
+                painter.rect_filled(rectangle, m.u(0.025), color);
+            }
+            Self::Triangle => {
+                let half_w = area.width() * 0.42;
+                let half_h = area.height() * 0.42;
+                painter.add(Shape::convex_polygon(
+                    vec![
+                        pos2(area.center().x - half_w, area.center().y - half_h),
+                        pos2(area.center().x + half_w, area.center().y),
+                        pos2(area.center().x - half_w, area.center().y + half_h),
+                    ],
+                    color,
+                    Stroke::NONE,
+                ));
+            }
+            Self::ThreeCircles => {
+                let diameter = (area.width() * 0.38).min(area.height() * 0.24);
+                let radius = diameter * 0.5;
+                let step = diameter * 1.2;
+                for offset in [-step, 0.0, step] {
+                    painter.circle_filled(
+                        pos2(area.center().x, area.center().y + offset),
+                        radius,
+                        color,
+                    );
+                }
+            }
+        }
+    }
+}
 
 /// What a header row is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,6 +237,8 @@ pub struct Column<'a> {
     /// Opt-in output activity lights; no independent refresh timer.
     pub activity: bool,
     pub activity_colors: bool,
+    /// The user's presentation choice; all styles share the same meter-driven activity value.
+    pub activity_style: ActivityStyle,
     /// This frame's meters (the channel strip's are instance 0), if the audio runs.
     pub meters: Option<&'a [ModuleMeter]>,
 }
@@ -250,10 +330,12 @@ pub fn show(
             // Channel-strip output, including live monitoring; no independent timer or DSP.
             let level = activity_intensity(peaks);
             let light = activity_rect(rect, m);
-            painter.rect_filled(light, m.u(0.06), c.background.to_color32());
+            col.activity_style
+                .paint(&painter, light, c.background.to_color32(), m);
             if level > 0.0 {
                 let flash = activity_color(col.activity_colors, ink);
-                painter.rect_filled(light, m.u(0.06), flash.gamma_multiply(level));
+                col.activity_style
+                    .paint(&painter, light, flash.gamma_multiply(level), m);
             }
         }
         // Reserve a separate gutter: controls retain their original width and touch targets.
@@ -602,5 +684,48 @@ mod playlist_visual_regressions {
         }
         assert_eq!(activity_color(false, Color32::RED), Color32::WHITE);
         assert_eq!(activity_color(true, Color32::RED), Color32::RED);
+    }
+
+    #[test]
+    fn every_activity_style_is_bounded_at_small_and_normal_row_heights_and_ui_scales() {
+        for scale in [60, 80, 100] {
+            let m = Metrics::from_pixels_per_point(1.0, scale);
+            for height in [0.45, 1.0, 2.0] {
+                let row = Rect::from_min_size(
+                    pos2(0.0, 0.0),
+                    vec2(m.u(1.5 + ACTIVITY_W), m.u(height)),
+                );
+                let area = activity_rect(row, &m);
+                for style in ActivityStyle::ALL {
+                    let ctx = eframe::egui::Context::default();
+                    let output = ctx.run(Default::default(), |ctx| {
+                        style.paint(
+                            &ctx.layer_painter(eframe::egui::LayerId::background()),
+                            area,
+                            Color32::WHITE,
+                            &m,
+                        );
+                    });
+                    let expected = if style == ActivityStyle::ThreeCircles {
+                        3
+                    } else {
+                        1
+                    };
+                    assert_eq!(output.shapes.len(), expected, "{style:?}, {scale}%, {height} U");
+                    for clipped in output.shapes {
+                        let bounds = match clipped.shape {
+                            Shape::Rect(shape) => shape.rect,
+                            Shape::Circle(shape) => Rect::from_center_size(
+                                shape.center,
+                                vec2(shape.radius * 2.0, shape.radius * 2.0),
+                            ),
+                            Shape::Path(shape) => Rect::from_points(&shape.points),
+                            shape => panic!("unexpected activity shape: {shape:?}"),
+                        };
+                        assert!(area.expand(0.001).contains_rect(bounds));
+                    }
+                }
+            }
+        }
     }
 }
