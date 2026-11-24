@@ -933,6 +933,8 @@ mod tests {
             range_labels: !d.range_labels,
             continuous_scroll: !d.continuous_scroll,
             playlist_follow_position: 675,
+            playlist_bar_line_limit: 48,
+            playlist_bar_visibility: 1,
             track_activity_indicators: !d.track_activity_indicators,
             track_activity_colors: true,
             show_hidden_tracks: !d.show_hidden_tracks,
