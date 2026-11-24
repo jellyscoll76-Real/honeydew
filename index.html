@@ -11,6 +11,10 @@
     <link rel="icon" type="image/png" sizes="32x32" href="banaforge-32.png" />
     <!-- wasm-opt off here: tools/web-dist.sh runs `wasm-opt -O3` itself after Trunk, as OpenPlayground's build does. -->
     <link data-trunk rel="rust" data-target-name="banaforge" data-cargo-profile-release="web" data-wasm-opt="0" />
+    <link data-trunk rel="copy-file" href="share-config.js" />
+    <link data-trunk rel="copy-file" href="src/content/share.mjs" />
+    <script src="./share-config.js"></script>
+    <script type="module" src="./share.mjs"></script>
     <!-- The bundled content's index, fetched while the wasm downloads. -->
     <link rel="preload" href="content/index.json" as="fetch" crossorigin />
     <script>
@@ -59,6 +63,40 @@
         width: 100%;
         height: 100%;
       }
+
+      #banaforge-share-dialog {
+        box-sizing: border-box;
+        width: min(92vw, 520px);
+        max-height: min(88vh, 720px);
+        padding: 0;
+        overflow: auto;
+        border: 1px solid #59636a;
+        border-radius: 12px;
+        background: #252d32;
+        color: #e1e6e8;
+        font: 15px/1.5 system-ui, sans-serif;
+      }
+
+      #banaforge-share-dialog::backdrop { background: #091015bb; }
+      #banaforge-share-dialog .share-shell { padding: 20px; }
+      #banaforge-share-dialog header,
+      #banaforge-share-dialog footer,
+      #banaforge-share-dialog .share-actions { display: flex; align-items: center; gap: 10px; }
+      #banaforge-share-dialog header { justify-content: space-between; font-size: 18px; }
+      #banaforge-share-dialog footer { justify-content: flex-end; margin-top: 22px; }
+      #banaforge-share-dialog .share-status { min-height: 3em; color: #c7ceda; }
+      #banaforge-share-dialog label { display: block; margin: 12px 0 6px; font-size: 13px; }
+      #banaforge-share-dialog input,
+      #banaforge-share-dialog select {
+        box-sizing: border-box; width: 100%; margin: 8px 0; padding: 10px; border: 1px solid #59636a;
+        border-radius: 6px; background: #151b1e; color: #e1e6e8;
+      }
+      #banaforge-share-dialog button {
+        min-height: 40px; padding: 8px 14px; border: 1px solid #718087; border-radius: 7px;
+        background: #303b41; color: inherit; font: inherit; cursor: pointer;
+      }
+      #banaforge-share-dialog button:disabled { opacity: .55; cursor: wait; }
+      #banaforge-share-dialog .share-close { min-width: 40px; padding: 4px; font-size: 22px; }
 
       #unsupported {
         display: none;

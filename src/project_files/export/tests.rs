@@ -143,6 +143,22 @@ fn midi_and_zip_are_written_into_their_folders_flash_saved_and_leave_the_song_al
 }
 
 #[test]
+fn share_archive_is_the_existing_project_zip_and_does_not_save_or_mutate_the_song() {
+    let (files, _) = files();
+    let song = note_song();
+    let before = song.clone();
+
+    let (name, bytes, omitted) = files.archive_for_sharing(&song).unwrap();
+    let entries = crate::zip::read(&bytes, crate::project_files::MAX_FILE_BYTES).unwrap();
+
+    assert_eq!(name, "New Song");
+    assert_eq!(omitted, 0);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "New Song.flm");
+    assert_eq!(song, before);
+}
+
+#[test]
 fn audio_goes_to_my_tracks_through_the_app_and_flm_does_nothing() {
     let (mut files, mem) = files();
     let song = note_song();

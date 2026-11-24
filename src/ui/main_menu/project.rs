@@ -379,6 +379,22 @@ impl ProjectTab {
         }
         band(GAP);
 
+        #[cfg(target_arch = "wasm32")]
+        {
+            let row = band(BUTTON_H);
+            if light_button(
+                ui,
+                cx,
+                id.with("share_project"),
+                row,
+                "Share project…",
+                true,
+            ) {
+                action = Some(MainMenuAction::ShareProject);
+            }
+            band(GAP);
+        }
+
         // Project info.
         let header = band(HEADER_H);
         label(

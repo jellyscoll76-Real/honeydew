@@ -1474,6 +1474,19 @@ pub(crate) mod web {
 
     /// Offers the adapter as `globalThis.playgroundLiveAdapter`, and to `globalThis.playgroundLive.attach` when the
     /// shell is already there. A page without the shell never connects.
+    pub(crate) fn open_share_dialog() {
+        let global = global();
+        let Ok(share) = Reflect::get(&global, &"banaforgeShare".into()) else {
+            return;
+        };
+        let Ok(open) = Reflect::get(&share, &"openDialog".into()) else {
+            return;
+        };
+        if let Ok(open) = open.dyn_into::<Function>() {
+            let _ = open.call0(&share);
+        }
+    }
+
     pub(crate) fn attach(runner: &eframe::WebRunner) -> Result<(), JsValue> {
         let adapter = Object::new();
         let set =
@@ -1492,6 +1505,50 @@ pub(crate) mod web {
         set(
             "checkpoint",
             Closure::<dyn Fn() -> _>::new(checkpoint).into_js_value(),
+        )?;
+        let app = runner.clone();
+        let share_archive = move || -> Result<JsValue, JsValue> {
+            let app = app
+                .app_mut::<BanaForgeApp>()
+                .ok_or_else(|| JsValue::from_str("BanaForge is not running"))?;
+            let (name, bytes, omitted) = app
+                .files
+                .archive_for_sharing(&app.song)
+                .map_err(|err| JsValue::from_str(&err))?;
+            let result = Object::new();
+            Reflect::set(&result, &"name".into(), &name.into())?;
+            Reflect::set(&result, &"bytes".into(), &Uint8Array::from(bytes.as_slice()))?;
+            Reflect::set(
+                &result,
+                &"omittedOriginalContent".into(),
+                &JsValue::from_f64(omitted as f64),
+            )?;
+            Ok(result.into())
+        };
+        set(
+            "shareArchive",
+            Closure::<dyn Fn() -> _>::new(share_archive).into_js_value(),
+        )?;
+        let app = runner.clone();
+        let ctx = runner.egui_ctx();
+        let open_shared = move |bytes: Uint8Array| -> Result<bool, JsValue> {
+            let mut app = app
+                .app_mut::<BanaForgeApp>()
+                .ok_or_else(|| JsValue::from_str("BanaForge is not running"))?;
+            let opened = app.files.replace(crate::project_files::Replace::Dropped(
+                std::path::PathBuf::from("Shared project.zip"),
+                bytes.to_vec(),
+            ));
+            let Some(song) = opened else {
+                return Ok(false);
+            };
+            app.song = song;
+            app.song_replaced(&ctx);
+            Ok(true)
+        };
+        set(
+            "openShared",
+            Closure::<dyn Fn(_) -> _>::new(open_shared).into_js_value(),
         )?;
         let merge = |base: Uint8Array,
                      current: Uint8Array,
@@ -1631,6 +1688,13 @@ pub(crate) mod web {
         )?;
         let global = global();
         Reflect::set(&global, &"playgroundLiveAdapter".into(), &adapter)?;
+        let share_attach = Reflect::get(&global, &"banaforgeShare".into())
+            .and_then(|share| Reflect::get(&share, &"attach".into()))
+            .ok()
+            .and_then(|attach| attach.dyn_into::<Function>().ok());
+        if let Some(attach) = share_attach {
+            attach.call1(&global, &adapter)?;
+        }
         let attach = Reflect::get(&global, &"playgroundLive".into())
             .and_then(|live| Reflect::get(&live, &"attach".into()))
             .ok()

@@ -187,6 +187,8 @@ Commit the updated `sounds/honeydew-sounds.zip.*` parts and `sounds/release.txt`
 
 ### Web
 
+Project sharing on the web creates an unlisted Supabase-backed link to a ZIP copy of the open song; anyone with the link can open it until it expires or is revoked. Configure a Supabase project and the public web settings as described in [the project-sharing setup guide](docs/project-sharing.md). Sharing remains disabled on deployments without that configuration. This is link-based project transfer, not cloud sync or live co-editing.
+
 For development:
 
 ```sh

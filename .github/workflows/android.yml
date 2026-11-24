@@ -1,6 +1,6 @@
 name: Android APK
 
-# Builds an installable Android APK (release-optimized with bundled sounds) and uploads it as a workflow artifact.
+# Branch pushes build a debug test APK (no release signing); manual runs can select an ABI, build type and sound bundle.
 on:
   push:
     branches:
@@ -64,6 +64,7 @@ jobs:
           cargo install cargo-ndk --version 4.1.2 --locked
       - name: Prepare signing key
         id: sign
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_type == 'release' }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -94,7 +95,7 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ steps.sign.outputs.keystore_pass }}
           ANDROID_KEY_ALIAS: ${{ steps.sign.outputs.key_alias }}
           ANDROID_KEY_PASSWORD: ${{ steps.sign.outputs.key_pass }}
-          BUILD_TYPE: ${{ inputs.build_type || 'release' }}
+          BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
           ABI_MODE: ${{ inputs.abi || 'all' }}
           INCLUDE_SOUNDS: ${{ inputs.include_sounds || 'false' }}
         run: |
@@ -103,8 +104,8 @@ jobs:
           if [ "$BUILD_TYPE" = release ]; then
             args+=(--release)
           fi
-          # A manual build defaults to the much smaller soundless APK; push builds keep the full bundled version.
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$INCLUDE_SOUNDS" != true ]; then
+          # Keep both branch test builds and the manual default small; sounds can be requested explicitly.
+          if [ "$INCLUDE_SOUNDS" != true ]; then
             args+=(--base)
           fi
           set +e
@@ -141,9 +142,9 @@ jobs:
           PY
           sha256sum "$apk" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "APK: \`$apk\`" >> "$GITHUB_STEP_SUMMARY"
-      - name: Remove signing key
+      - name: Remove temporary signing keys
         if: always()
-        run: rm -f "$RUNNER_TEMP/banaforge-release.jks"
+        run: rm -f "$RUNNER_TEMP/banaforge-release.jks" android/debug.keystore
       - uses: actions/upload-artifact@v4
         with:
           name: banaforge-android-apk

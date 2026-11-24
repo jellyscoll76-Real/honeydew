@@ -485,6 +485,19 @@ impl ProjectFiles {
         }
     }
 
+    /// A shareable archive of `song`: the same project ZIP as the Save dialog, without writing or changing the song.
+    /// Returns its suggested name, bytes and the number of original-content files intentionally omitted.
+    pub(crate) fn archive_for_sharing(
+        &self,
+        song: &Song,
+    ) -> Result<(String, Vec<u8>, usize), String> {
+        let name = self.proposed_name(song);
+        let (bytes, omitted) = self
+            .archive(song, &name)
+            .map_err(|(title, detail)| format!("{title}: {detail}"))?;
+        Ok((name, bytes, omitted))
+    }
+
     /// The project archive of `song` as `<name>.flm`: the song as a save writes it, then every user file it plays;
     /// and the count of original content files left out. An error carries its message's title.
     fn archive(&self, song: &Song, name: &str) -> Result<(Vec<u8>, usize), (&'static str, String)> {

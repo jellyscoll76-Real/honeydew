@@ -313,6 +313,8 @@ pub fn show(
             let format = quick_render_format(app.settings.last_audio_format);
             app.files.quick_render(app.song, format);
         }
+        #[cfg(target_arch = "wasm32")]
+        MainMenuAction::ShareProject => crate::app::live::web::open_share_dialog(),
         MainMenuAction::Import => replace(app, Replace::Pick),
         MainMenuAction::ImportFolder => app.files.pick_folder(),
         MainMenuAction::Open(path) => replace(app, Replace::Open(path)),
