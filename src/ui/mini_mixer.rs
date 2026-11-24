@@ -115,7 +115,9 @@ impl ActivityStyle {
                 );
                 painter.rect_filled(pill, pill.width() * 0.5, color);
             }
-            Self::DefaultSquare => painter.rect_filled(area, m.u(0.06), color),
+            Self::DefaultSquare => {
+                painter.rect_filled(area, m.u(0.06), color);
+            }
             Self::FlmRectangle => {
                 let rectangle = Rect::from_center_size(
                     area.center(),
