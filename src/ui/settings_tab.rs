@@ -2042,6 +2042,7 @@ mod tests {
                         | Kind::AudioInput
                         | Kind::FixedDropdown(_)
                         | Kind::SignIn
+                        | Kind::BarLineLimit
                 )
             }) {
                 let control = rig.rect_of(row_id(index(r.label)));
