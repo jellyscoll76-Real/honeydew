@@ -1768,6 +1768,8 @@ mod tests {
         assert_eq!(values(Choice::Theme), (0..9).collect::<Vec<_>>());
         assert_eq!(labels(Choice::Animation), ["Full", "Reduced", "Minimal"]);
         assert_eq!(values(Choice::Animation), [0, 1, 2]);
+        assert_eq!(labels(Choice::BarLineVisibility), ["Adaptive", "Always"]);
+        assert_eq!(values(Choice::BarLineVisibility), [0, 1]);
         // The buttons show the current item.
         let s = Settings::default();
         assert_eq!(
@@ -1781,7 +1783,7 @@ mod tests {
         assert_eq!(Choice::Theme.label(&s), "Classic Gray");
         assert_eq!(Choice::Animation.label(&s), "Full");
         let mut s = Settings::default();
-        for c in [Choice::Theme, Choice::Animation] {
+        for c in [Choice::Theme, Choice::Animation, Choice::BarLineVisibility] {
             let (value, label) = c.items()[1].clone();
             c.set(&mut s, value);
             assert_eq!(c.get(&s), value);
