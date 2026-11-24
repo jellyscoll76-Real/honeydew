@@ -246,6 +246,12 @@ pub struct Settings {
     /// Playlist follow anchor in thousandths of the visible timeline width (5–95%).
     #[serde(rename = "playlistFollowPosition")]
     pub playlist_follow_position: u16,
+    /// Visual-only maximum number of major Playlist bar lines across the visible timeline.
+    #[serde(rename = "playlistBarLineLimit")]
+    pub playlist_bar_line_limit: u16,
+    /// Playlist bar visibility: 0 = Adaptive, 1 = Always. Independent of musical snapping.
+    #[serde(rename = "playlistBarVisibility")]
+    pub playlist_bar_visibility: u8,
     /// Optional visual-only Playlist channel activity lights.
     #[serde(rename = "trackActivityIndicators")]
     pub track_activity_indicators: bool,
@@ -456,6 +462,8 @@ impl Default for Settings {
             range_labels: true,
             continuous_scroll: false,
             playlist_follow_position: 250,
+            playlist_bar_line_limit: 24,
+            playlist_bar_visibility: 0,
             track_activity_indicators: false,
             track_activity_colors: false,
             show_hidden_tracks: false,
@@ -538,10 +546,14 @@ impl Settings {
             serde_json::from_value::<Self>(Value::Object(one)).is_ok()
         });
         let mut s: Self = serde_json::from_value(Value::Object(fields)).unwrap_or_default();
+        let d = Self::default();
         s.auto_save_interval_secs = s.auto_save_interval_secs.clamp(10, 86400);
         s.playlist_follow_position = s.playlist_follow_position.clamp(50, 950);
+        s.playlist_bar_line_limit = s.playlist_bar_line_limit.clamp(1, 256);
+        if s.playlist_bar_visibility > 1 {
+            s.playlist_bar_visibility = d.playlist_bar_visibility;
+        }
         s.vocal_waveform_offset_y = s.vocal_waveform_offset_y.min(40);
-        let d = Self::default();
         if s.theme as usize >= builtin_themes().len() {
             s.theme = d.theme;
         }
@@ -1077,6 +1089,40 @@ mod tests {
         assert_eq!(
             Settings::load(&stored(r#"{"playlistFollowPosition":65000}"#)).playlist_follow_position,
             950
+        );
+    }
+
+    #[test]
+    fn playlist_bar_display_settings_persist_and_validate_independently_of_snap() {
+        assert_eq!(Settings::load(&stored("{}")).playlist_bar_line_limit, 24);
+        assert_eq!(Settings::load(&stored("{}")).playlist_bar_visibility, 0);
+        for (limit, visibility) in [(1, 0), (24, 1), (256, 0)] {
+            let mut mem = Mem::default();
+            let s = Settings {
+                playlist_bar_line_limit: limit,
+                playlist_bar_visibility: visibility,
+                grid_size: GridSize::Note(16, true),
+                ..Settings::default()
+            };
+            s.save(&mut mem);
+            let loaded = Settings::load(&mem);
+            assert_eq!(
+                (loaded.playlist_bar_line_limit, loaded.playlist_bar_visibility),
+                (limit, visibility)
+            );
+            assert_eq!(loaded.grid_size, s.grid_size);
+        }
+        assert_eq!(
+            Settings::load(&stored(r#"{"playlistBarLineLimit":0}"#)).playlist_bar_line_limit,
+            1
+        );
+        assert_eq!(
+            Settings::load(&stored(r#"{"playlistBarLineLimit":9999}"#)).playlist_bar_line_limit,
+            256
+        );
+        assert_eq!(
+            Settings::load(&stored(r#"{"playlistBarVisibility":9}"#)).playlist_bar_visibility,
+            0
         );
     }
 
