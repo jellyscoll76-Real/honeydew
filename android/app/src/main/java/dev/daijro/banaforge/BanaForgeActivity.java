@@ -190,8 +190,13 @@ public final class BanaForgeActivity extends NativeActivity {
     }
 
     public void editText(long requestId, String text, boolean multiline, int limit) {
+        editText(requestId, text, multiline, limit, false, false);
+    }
+
+    public void editText(long requestId, String text, boolean multiline, int limit,
+                         boolean numeric, boolean password) {
         if (dialogs != null) {
-            dialogs.showTextEditor(requestId, text, multiline, limit);
+            dialogs.showTextEditor(requestId, text, multiline, limit, numeric, password);
         } else {
             onTextResult(requestId, text == null ? "" : text, false);
         }

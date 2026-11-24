@@ -44,6 +44,11 @@ final class BanaForgeDialogs {
     }
 
     void showTextEditor(long requestId, String initialText, boolean multiline, int limit) {
+        showTextEditor(requestId, initialText, multiline, limit, false, false);
+    }
+
+    void showTextEditor(long requestId, String initialText, boolean multiline, int limit,
+                        boolean numeric, boolean password) {
         activity.runOnUiThread(() -> {
             String safeText = initialText == null ? "" : initialText;
             if (activity.isFinishing() || activity.isDestroyed()) {
@@ -72,9 +77,17 @@ final class BanaForgeDialogs {
             input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
             input.setPadding(dp(16), dp(14), dp(16), dp(14));
             input.setMinHeight(dp(52));
-            input.setInputType(InputType.TYPE_CLASS_TEXT
-                    | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-                    | (multiline ? InputType.TYPE_TEXT_FLAG_MULTI_LINE : 0));
+            int inputType;
+            if (numeric) {
+                inputType = InputType.TYPE_CLASS_NUMBER;
+            } else if (password) {
+                inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD;
+            } else {
+                inputType = InputType.TYPE_CLASS_TEXT
+                        | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                        | (multiline ? InputType.TYPE_TEXT_FLAG_MULTI_LINE : 0);
+            }
+            input.setInputType(inputType);
             input.setSingleLine(!multiline);
             if (multiline) {
                 input.setMinLines(3);

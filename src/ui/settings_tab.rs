@@ -54,11 +54,11 @@
 //! folder in the system's file manager ([`SettingsTab::take_reveal`]). They show only where there is such a folder
 //! ([`SettingsTab::content`]): natively, not on the web; on Android the system Files app shows it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{
-    Align2, Color32, DragValue, Id, Pos2, Rect, Response, Sense, Shape, TextEdit, Ui, UiBuilder,
+    Align2, Color32, Id, Pos2, Rect, Response, Sense, Shape, TextEdit, Ui, UiBuilder,
     WidgetInfo, WidgetType, vec2,
 };
 
@@ -244,6 +244,28 @@ const fn row(label: &'static str, kind: Kind) -> Row {
     Row { label, kind }
 }
 
+/// One-U square information target centred one U left of the settings column.
+fn row_help_rect(slot: Rect, m: crate::metrics::Metrics) -> Rect {
+    let side = m.u(1.0);
+    Rect::from_center_size(
+        Pos2::new(slot.left() - side, slot.center().y),
+        vec2(side, side),
+    )
+}
+
+fn numeric_draft_value(
+    text: &str,
+    range: &std::ops::RangeInclusive<u16>,
+    finalize: bool,
+) -> Option<u16> {
+    let value = text.parse::<u16>().ok()?;
+    if finalize {
+        Some(value.clamp(*range.start(), *range.end()))
+    } else {
+        range.contains(&value).then_some(value)
+    }
+}
+
 // Explicit platform inputs let host tests exercise mobile filtering too.
 fn platform_row_visible(r: &Row, desktop: bool, web: bool) -> bool {
     !(web
@@ -313,7 +335,6 @@ const ROWS: [Row; 81 + cfg!(desktop) as usize] = {
             "Show information buttons",
             Toggle(|s| &mut s.show_information_buttons),
         ),
-        row("Application:", Header),
         row("Edit:", Header),
         row("Timeline Grid / Bar Lines:", Header),
         row("Maximum visible bar lines", BarLineLimit),
@@ -351,6 +372,13 @@ const ROWS: [Row; 81 + cfg!(desktop) as usize] = {
             Toggle(|s| &mut s.track_activity_colors),
         ),
         row("Show hidden tracks", Toggle(|s| &mut s.show_hidden_tracks)),
+        row("Timeline Grid / Bar Lines:", Header),
+        row("Maximum visible bar lines", BarLineLimit),
+        row(
+            "Keep bar lines visible at every zoom level",
+            Toggle(|s| &mut s.playlist_bar_lines_always_visible),
+        ),
+        row("Application:", Header),
         row(
             "Show CPU and RAM meters",
             Toggle(|s| &mut s.hardware_meters),
@@ -467,6 +495,8 @@ pub struct SettingsTab {
     /// Section headers the user has collapsed (all start open). This is UI state, so it is kept for the lifetime of
     /// the settings tab rather than saved as an application preference.
     collapsed_sections: HashSet<&'static str>,
+    /// In-progress numeric text, retained between frames while a field is being edited.
+    numeric_drafts: HashMap<Id, String>,
     /// `Calibrate` was tapped: the app starts the latency calibration and clears it.
     pub calibrate: bool,
     /// The MIDI input ports the `Input device:` menu lists ([`Self::set_midi_ports`]).
@@ -613,6 +643,31 @@ impl SettingsTab {
             .collect()
     }
 
+    /// Numeric settings share an editable string draft so partial input (including an empty field) survives frames.
+    /// On Android the native text editor supplies the IME; on desktop this is an ordinary egui text field.
+    fn numeric_field(
+        &mut self,
+        ui: &mut Ui,
+        id: Id,
+        rect: Rect,
+        current: u16,
+        range: std::ops::RangeInclusive<u16>,
+        max_chars: usize,
+    ) -> (Response, Option<u16>) {
+        let mut draft = self
+            .numeric_drafts
+            .remove(&id)
+            .unwrap_or_else(|| current.to_string());
+        let mut response = ui.put(rect, TextEdit::singleline(&mut draft).id(id));
+        crate::android_text::edit_number(&mut response, &mut draft, max_chars);
+        let lost_focus = response.lost_focus();
+        let value = numeric_draft_value(&draft, &range, lost_focus);
+        if response.has_focus() && !lost_focus {
+            self.numeric_drafts.insert(id, draft);
+        }
+        (response, value)
+    }
+
     /// Draws the tab in `page` (the menu panel's width, below its tab row) and applies the user's edits to `settings`;
     /// the app saves and applies what changed.
     pub fn show(&mut self, ui: &mut Ui, cx: &UiCtx, page: Rect, settings: &mut Settings) {
@@ -709,11 +764,8 @@ impl SettingsTab {
     ) {
         let (m, colors) = (cx.m, &cx.theme.colors);
         if let Some(topic) = crate::ui::help::setting(row.label) {
-            crate::ui::help::button(
-                ui,
-                Pos2::new(slot.left() - m.u(TOGGLE_OUT) - 32.0, slot.center().y - 15.0),
-                topic,
-            );
+            let rect = row_help_rect(slot, m);
+            crate::ui::help::button_sized(ui, rect.min, topic, rect.width());
         }
         // Headers and the metronome row take the whole slot; the other rows are a control row, centred in it.
         let r = match row.kind {
@@ -955,13 +1007,20 @@ impl SettingsTab {
                     button_rect.right_center() - vec2(m.u(4.5), m.u(BUTTON_H / 2.0)),
                     vec2(m.u(4.5), m.u(BUTTON_H)),
                 );
-                ui.scope(|ui| {
-                    ui.style_mut().override_font_id = Some(m.font_id(FontSize::Pt12));
-                    ui.put(field, DragValue::new(&mut s.playlist_bar_line_limit).range(1..=256));
-                });
+                let (response, value) = self.numeric_field(
+                    ui,
+                    id.with("bar-line-limit"),
+                    field,
+                    s.playlist_bar_line_limit,
+                    1..=256,
+                    3,
+                );
+                if let Some(value) = value {
+                    s.playlist_bar_line_limit = value;
+                }
                 crate::ui::tooltip::tip(
                     ui,
-                    field,
+                    response.rect,
                     "Visual-only cap for main Playlist bar lines. The default is 24; changing it never changes clip timing or snapping.",
                     None,
                 );
@@ -1011,10 +1070,23 @@ impl SettingsTab {
                     button_rect.right_center() - vec2(m.u(5.0), m.u(BUTTON_H / 2.0)),
                     vec2(m.u(5.0), m.u(BUTTON_H)),
                 );
-                ui.scope(|ui| {
-                    ui.style_mut().override_font_id = Some(m.font_id(FontSize::Pt12));
-                    ui.put(port, DragValue::new(&mut s.mcp_port).range(1024..=65535));
-                });
+                let (response, value) = self.numeric_field(
+                    ui,
+                    id.with("mcp-port"),
+                    port,
+                    s.mcp_port,
+                    1024..=65535,
+                    5,
+                );
+                if let Some(value) = value {
+                    s.mcp_port = value;
+                }
+                crate::ui::tooltip::tip(
+                    ui,
+                    response.rect,
+                    "Numeric input for the MCP server port (1024–65535).",
+                    None,
+                );
             }
             Kind::McpToken => {
                 label(ui, before(button_rect), FontSize::Pt10);
@@ -1036,13 +1108,14 @@ impl SettingsTab {
                     ui.ctx().copy_text(s.mcp_token.clone());
                 }
                 let token_rect = r.with_max_x(copy.left() - m.u(MARGIN));
-                ui.put(
+                let mut response = ui.put(
                     token_rect,
                     TextEdit::singleline(&mut s.mcp_token)
                         .id(id.with("token"))
                         .password(true)
                         .hint_text("not generated"),
                 );
+                crate::android_text::edit_password(&mut response, &mut s.mcp_token, usize::MAX);
             }
             Kind::McpStatus => {
                 label(ui, before(button_rect), FontSize::Pt10);
@@ -1601,7 +1674,6 @@ mod tests {
                 "Scale is currently limited to",
                 "Animation:",
                 "Show information buttons",
-                "Application:",
                 "Edit:",
                 "Timeline Grid / Bar Lines:",
                 "Maximum visible bar lines",
@@ -1618,6 +1690,10 @@ mod tests {
                 "Track activity indicators",
                 "Match activity indicators to track color",
                 "Show hidden tracks",
+                "Timeline Grid / Bar Lines:",
+                "Maximum visible bar lines",
+                "Keep bar lines visible at every zoom level",
+                "Application:",
                 "Show CPU and RAM meters",
                 "Show performance overlay",
                 "Project version size limit:",
@@ -1675,6 +1751,69 @@ mod tests {
             if !matches!(r.kind, Kind::FixedDropdown(_)) {
                 assert_eq!(r.label.ends_with(':'), header || dropdown, "{}", r.label);
             }
+        }
+    }
+
+    #[test]
+    fn every_collapsible_section_has_at_least_one_control() {
+        let mut section_has_content = None;
+        for row in &ROWS {
+            if matches!(row.kind, Kind::Header) {
+                assert_ne!(section_has_content, Some(false), "empty section before {}", row.label);
+                section_has_content = Some(false);
+            } else if section_has_content.is_some() {
+                section_has_content = Some(true);
+            }
+        }
+        assert_eq!(section_has_content, Some(true));
+    }
+
+    #[test]
+    fn bar_line_limit_text_field_accepts_replacement_input() {
+        let mut rig = Rig::new();
+        let field_id = row_id(index("Maximum visible bar lines")).with("bar-line-limit");
+        let field = rig.rect_of(field_id);
+        rig.click(field.center());
+        rig.frame(vec![Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        }]);
+        rig.frame(vec![Event::Text("36".into())]);
+        assert_eq!(rig.settings.playlist_bar_line_limit, 36);
+    }
+
+    #[test]
+    fn numeric_drafts_accept_partial_input_then_validate_and_clamp_on_commit() {
+        let bars = 1..=256;
+        assert_eq!(numeric_draft_value("2", &bars, false), Some(2));
+        assert_eq!(numeric_draft_value("", &bars, false), None);
+        assert_eq!(numeric_draft_value("x", &bars, false), None);
+        assert_eq!(numeric_draft_value("0", &bars, false), None);
+        assert_eq!(numeric_draft_value("0", &bars, true), Some(1));
+        assert_eq!(numeric_draft_value("900", &bars, true), Some(256));
+
+        let port = 1024..=65535;
+        assert_eq!(numeric_draft_value("4321", &port, false), Some(4321));
+        assert_eq!(numeric_draft_value("22", &port, false), None);
+        assert_eq!(numeric_draft_value("22", &port, true), Some(1024));
+    }
+
+    #[test]
+    fn settings_help_targets_scale_with_the_ui_and_stay_centered_on_their_rows() {
+        for scale in [60, 80, 100, 125, 150, 200] {
+            let m = Metrics::from_pixels_per_point(1.0, scale);
+            let slot = Rect::from_min_size(
+                Pos2::new(100.0, 200.0),
+                vec2(m.u(20.0), m.u(2.0)),
+            );
+            let target = row_help_rect(slot, m);
+            assert!((target.width() - m.u(1.0)).abs() < 1e-4, "scale {scale}");
+            assert!((target.height() - m.u(1.0)).abs() < 1e-4, "scale {scale}");
+            assert!((target.center().x - (slot.left() - m.u(1.0))).abs() < 1e-4, "scale {scale}");
+            assert!((target.center().y - slot.center().y).abs() < 1e-4, "scale {scale}");
         }
     }
 

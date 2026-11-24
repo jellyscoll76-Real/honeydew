@@ -128,6 +128,29 @@ pub fn begin_frame(ctx: &Context) {
 /// Call after each text field is drawn, before its changed/Enter handling.
 #[cfg(target_os = "android")]
 pub fn edit(response: &mut Response, value: &mut String, limit: usize) {
+    edit_with_options(response, value, limit, false, false);
+}
+
+/// Opens Android's numeric keypad for a number-oriented text field.
+#[cfg(target_os = "android")]
+pub fn edit_number(response: &mut Response, value: &mut String, limit: usize) {
+    edit_with_options(response, value, limit, true, false);
+}
+
+/// Keeps secrets masked in Android's native text editor.
+#[cfg(target_os = "android")]
+pub fn edit_password(response: &mut Response, value: &mut String, limit: usize) {
+    edit_with_options(response, value, limit, false, true);
+}
+
+#[cfg(target_os = "android")]
+fn edit_with_options(
+    response: &mut Response,
+    value: &mut String,
+    limit: usize,
+    numeric: bool,
+    password: bool,
+) {
     let ctx = response.ctx.clone();
     let focused = ctx.memory(|m| m.has_focus(response.id));
     let mut editor = lock_editor();
@@ -168,12 +191,14 @@ pub fn edit(response: &mut Response, value: &mut String, limit: usize) {
         env.call_method(
             activity,
             "editText",
-            "(JLjava/lang/String;ZI)V",
+            "(JLjava/lang/String;ZIZZ)V",
             &[
                 jni::objects::JValue::Long(serial as i64),
                 jni::objects::JValue::Object(text.as_ref()),
                 jni::objects::JValue::Bool(0),
                 jni::objects::JValue::Int(max_chars),
+                jni::objects::JValue::Bool(u8::from(numeric)),
+                jni::objects::JValue::Bool(u8::from(password)),
             ],
         )?;
         Ok(())
@@ -231,6 +256,12 @@ pub extern "system" fn Java_dev_daijro_banaforge_BanaForgeActivity_onTextResult(
 
 #[cfg(not(target_os = "android"))]
 pub fn edit(_: &mut eframe::egui::Response, _: &mut String, _: usize) {}
+
+#[cfg(not(target_os = "android"))]
+pub fn edit_number(_: &mut eframe::egui::Response, _: &mut String, _: usize) {}
+
+#[cfg(not(target_os = "android"))]
+pub fn edit_password(_: &mut eframe::egui::Response, _: &mut String, _: usize) {}
 
 /// Consume native Done directly instead of injecting Enter into another editor/shortcut.
 #[cfg(target_os = "android")]

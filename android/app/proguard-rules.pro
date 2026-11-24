@@ -30,6 +30,7 @@
     public *** installApk(java.lang.String);
     public *** editText(long, java.lang.String, boolean);
     public *** editText(long, java.lang.String, boolean, int);
+    public *** editText(long, java.lang.String, boolean, int, boolean, boolean);
     public *** cancelTextEdit(long);
     public *** quitApp();
     public *** setKeepScreenOn(boolean);

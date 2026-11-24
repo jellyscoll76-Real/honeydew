@@ -87,24 +87,30 @@ fn icons_visible(ctx: &egui::Context) -> bool {
 
 /// Row-local touch target: shares the parent layer and scroll clip, never floats above menus.
 pub fn button(ui: &mut egui::Ui, at: egui::Pos2, topic: Topic) {
+    button_sized(ui, at, topic, 30.0);
+}
+
+/// The scaled row variant keeps its hit target and icon geometry in the same UI units as the row.
+pub fn button_sized(ui: &mut egui::Ui, at: egui::Pos2, topic: Topic, size: f32) {
     let ctx = ui.ctx().clone();
     let key = Id::new("contextual-help-open");
     let response = icons_visible(&ctx).then(|| {
-        let rect = Rect::from_min_size(at, vec2(30.0, 30.0));
+        let rect = Rect::from_min_size(at, vec2(size, size));
+        let scale = size / 30.0;
         let response = ui.interact(rect, Id::new(("help-icon", topic.title())), Sense::click());
         let ink = Color32::from_rgb(185, 205, 220);
         let painter = ui.painter_at(ui.clip_rect());
         painter.circle(
             rect.center(),
-            8.0,
+            8.0 * scale,
             Color32::from_rgb(35, 43, 54),
-            Stroke::new(1.0, ink),
+            Stroke::new(scale, ink),
         );
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
             "i",
-            FontId::proportional(13.0),
+            FontId::proportional(13.0 * scale),
             ink,
         );
         response.widget_info(|| {
