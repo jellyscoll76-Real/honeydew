@@ -2463,9 +2463,10 @@ fn open_panel_button(
     response
 }
 
-/// Playlist-only visual grid. Bar lines are independent of the musical snap grid: the visible bar range is
-/// decimated to the user's line budget, and Adaptive additionally keeps major lines at least 1 U apart. Beat lines
-/// appear only when a beat has room to read. No subdivisions are drawn here; editing and snapping remain unchanged.
+/// Playlist-only visual grid. Bar lines are independent of the musical snap grid: Adaptive hides them when one bar
+/// is narrower than 1 U, while Always retains them; either mode decimates the visible range to the user's line budget.
+/// Beat lines appear only when a beat has room to read. No subdivisions are drawn here; editing and snapping remain
+/// unchanged.
 fn playlist_grid_lines(
     t0: f64,
     t1: f64,
@@ -2485,22 +2486,18 @@ fn playlist_grid_lines(
         return Vec::new();
     }
     let count = (last - first + 1) as u64;
-    let budget_stride = count.div_ceil(u64::from(max_bars.clamp(1, 256))) as i64;
-    let spacing_stride = if always || beat_w * budget_stride as f32 >= u {
-        1
-    } else {
-        (u / beat_w).ceil().max(1.0) as i64
-    };
-    let stride = budget_stride.max(spacing_stride);
+    let stride = count.div_ceil(u64::from(max_bars.clamp(1, 256))) as i64;
     let mut lines = Vec::with_capacity(max_bars as usize + 32);
-    let mut bar = first;
-    let rem = bar.rem_euclid(stride);
-    if rem != 0 {
-        bar += stride - rem;
-    }
-    while bar <= last {
-        lines.push((bar as f64 * bar_ticks, 4.0));
-        bar += stride;
+    if always || beat_w * sig.bar_beats() as f32 >= u {
+        let mut bar = first;
+        let rem = bar.rem_euclid(stride);
+        if rem != 0 {
+            bar += stride - rem;
+        }
+        while bar <= last {
+            lines.push((bar as f64 * bar_ticks, 4.0));
+            bar += stride;
+        }
     }
     // Beat lines are secondary, and only shown when they have at least 0.6 U of separation.
     if beat_w >= 0.6 * u {
