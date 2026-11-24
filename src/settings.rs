@@ -242,6 +242,12 @@ pub struct Settings {
     /// Playlist follow anchor in thousandths of the visible timeline width (5–95%).
     #[serde(rename = "playlistFollowPosition")]
     pub playlist_follow_position: u16,
+    /// Maximum number of Playlist bar lines shown in the visible timeline; display-only.
+    #[serde(rename = "playlistBarLineLimit")]
+    pub playlist_bar_line_limit: u16,
+    /// Always keep bar lines visible (sparsely when capped), or hide them when zoomed out beyond the limit.
+    #[serde(rename = "playlistBarLinesAlwaysVisible")]
+    pub playlist_bar_lines_always_visible: bool,
     /// Optional visual-only Playlist channel activity lights.
     #[serde(rename = "trackActivityIndicators")]
     pub track_activity_indicators: bool,
@@ -450,6 +456,8 @@ impl Default for Settings {
             range_labels: true,
             continuous_scroll: false,
             playlist_follow_position: 250,
+            playlist_bar_line_limit: 24,
+            playlist_bar_lines_always_visible: true,
             track_activity_indicators: false,
             track_activity_colors: false,
             show_hidden_tracks: false,
@@ -533,6 +541,7 @@ impl Settings {
         });
         let mut s: Self = serde_json::from_value(Value::Object(fields)).unwrap_or_default();
         s.playlist_follow_position = s.playlist_follow_position.clamp(50, 950);
+        s.playlist_bar_line_limit = s.playlist_bar_line_limit.clamp(1, 256);
         s.vocal_waveform_offset_y = s.vocal_waveform_offset_y.min(40);
         let d = Self::default();
         if s.theme as usize >= builtin_themes().len() {
@@ -912,6 +921,8 @@ mod tests {
             range_labels: !d.range_labels,
             continuous_scroll: !d.continuous_scroll,
             playlist_follow_position: 675,
+            playlist_bar_line_limit: 32,
+            playlist_bar_lines_always_visible: false,
             track_activity_indicators: !d.track_activity_indicators,
             track_activity_colors: true,
             show_hidden_tracks: !d.show_hidden_tracks,
@@ -1044,6 +1055,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn playlist_bar_line_preferences_persist_and_clamp_without_touching_snap_settings() {
+        let mut mem = Mem::default();
+        let settings = Settings {
+            playlist_bar_line_limit: 23,
+            playlist_bar_lines_always_visible: false,
+            grid_size: GridSize::Note(8, true),
+            ..Settings::default()
+        };
+        settings.save(&mut mem);
+        let loaded = Settings::load(&mem);
+        assert_eq!(loaded.playlist_bar_line_limit, 23);
+        assert!(!loaded.playlist_bar_lines_always_visible);
+        assert_eq!(loaded.grid_size, settings.grid_size);
+        assert_eq!(Settings::load(&stored("{}")).playlist_bar_line_limit, 24);
+        assert_eq!(
+            Settings::load(&stored(r#"{"playlistBarLineLimit":0}"#)).playlist_bar_line_limit,
+            1
+        );
+        assert_eq!(
+            Settings::load(&stored(r#"{"playlistBarLineLimit":900}"#)).playlist_bar_line_limit,
+            256
+        );
     }
 
     #[test]

@@ -684,7 +684,14 @@ impl MainScreen {
             grid.left(),
             &shown,
             axis,
-            (app.song.time_sig, row_h, current, self.snap.size),
+            (
+                app.song.time_sig,
+                row_h,
+                current,
+                self.snap.size,
+                app.settings.playlist_bar_line_limit,
+                app.settings.playlist_bar_lines_always_visible,
+            ),
             &cx,
         );
         crate::ui::sections::tint(ui, grid, &shown, row_h, axis, &app.song.sections, &cx);
@@ -2458,20 +2465,90 @@ fn open_panel_button(
     response
 }
 
+/// Removes fine subdivision lines once the Playlist is zoomed in past its opening beat width. Beat and bar marks
+/// remain, so zooming in does not introduce successively finer visual subdivisions; editing and snap stay untouched.
+fn playlist_zoom_mark_policy(
+    marks: Vec<(f64, f32)>,
+    beat_w: f32,
+    opening_beat_w: f32,
+) -> Vec<(f64, f32)> {
+    if beat_w <= opening_beat_w {
+        marks
+    } else {
+        marks.into_iter().filter(|(_, width)| *width >= 2.0).collect()
+    }
+}
+
+/// Applies Playlist-only bar-line visibility to already-generated visual marks. This never feeds the snap/edit grid.
+/// The cap is per visible viewport. In always-visible mode bars are thinned on a globally aligned stride; in
+/// zoom-aware mode they are hidden whenever the visible bar count exceeds the limit. Secondary marks keep their
+/// existing generation and widths, while actual bar marks stay 4 px and are generated even when Auto's coarse zoom
+/// spacing would otherwise skip them.
+fn playlist_bar_line_policy(
+    t0: f64,
+    t1: f64,
+    mut marks: Vec<(f64, f32)>,
+    sig: TimeSig,
+    limit: u16,
+    always_show: bool,
+) -> Vec<(f64, f32)> {
+    let bar_ticks = f64::from(sig.bar_beats()) * f64::from(PPQ);
+    if !bar_ticks.is_finite() || bar_ticks <= 0.0 || !t0.is_finite() || !t1.is_finite() {
+        return marks;
+    }
+    marks.retain(|(tick, _)| {
+        let multiple = *tick / bar_ticks;
+        (multiple - multiple.round()).abs() > 1e-6
+    });
+    let first = (t0.max(0.0) / bar_ticks).ceil() as i64;
+    let last = (t1 / bar_ticks).floor() as i64;
+    if first > last {
+        return marks;
+    }
+    let count = last.saturating_sub(first).saturating_add(1) as u64;
+    let limit = u64::from(limit.clamp(1, 256));
+    if !always_show && count > limit {
+        return marks;
+    }
+    let stride = if always_show {
+        count.div_ceil(limit).max(1) as i64
+    } else {
+        1
+    };
+    let first_aligned = first + (stride - first.rem_euclid(stride)).rem_euclid(stride);
+    let mut bar = first_aligned;
+    while bar <= last {
+        marks.push((bar as f64 * bar_ticks, 4.0));
+        let Some(next) = bar.checked_add(stride) else {
+            break;
+        };
+        bar = next;
+    }
+    marks.sort_by(|a, b| a.0.total_cmp(&b.0));
+    marks
+}
+
 /// Paints `rect` in `background`, then the lanes of `tracks`, each from its top edge, in order (rows above or below the
 /// rect are clipped by the painter, so a scrolled caller passes just the visible rows), with the beat grid of `axis`
 /// from `grid_left` on. The header column left of it is [`mini_mixer::show`]'s. Each row is filled from the grid's left
 /// edge (or beat 0's x when scrolled before it) to its right edge, a device pixel short of the next row, in
 /// `moduleFill` for the `current` track and `controlFill` for the others; the beat lines over them are `background`,
-/// 4 px at bars, 2 px at beats and 1 px finer, centred, at least 0.6 U apart (the drum free grid's
-/// [`marks`](crate::ui::drum_grid::edit::marks)), or at the grid `size` ([`grid_lines`], #53).
+/// 4 px at bars, 2 px at beats and 1 px finer. Main bar lines have a display-only cap and zoom policy; all other
+/// visual marks continue to follow the existing grid law / snap display mode unchanged.
 fn paint_track_rows(
     painter: &Painter,
     rect: Rect,
     grid_left: f32,
     tracks: &[(TrackRow, f32)],
     axis: TimeAxis,
-    (sig, row_h, current, size): (TimeSig, f32, Option<(usize, usize)>, GridSize),
+    (sig, row_h, current, size, bar_limit, always_show_bars): (
+        TimeSig,
+        f32,
+        Option<(usize, usize)>,
+        GridSize,
+        u16,
+        bool,
+    ),
     cx: &UiCtx,
 ) {
     let UiCtx { theme, m } = *cx;
@@ -2481,10 +2558,13 @@ fn paint_track_rows(
     let grid = rect.with_min_x(grid_left);
     let px = 1.0 / m.ppp();
     let (t0, t1) = (axis.tick(grid.left()), axis.tick(grid.right()));
-    let lines: Vec<(f32, f32)> = grid_lines(t0, t1, axis.beat_w, m.u(1.0), sig, MARK_GAP, size)
-        .into_iter()
-        .map(|(tick, w)| (m.round_px(axis.x(tick)) - (w / 2.0).floor() * px, w * px))
-        .collect();
+    let marks = grid_lines(t0, t1, axis.beat_w, m.u(1.0), sig, MARK_GAP, size);
+    let marks = playlist_bar_line_policy(t0, t1, marks, sig, bar_limit, always_show_bars);
+    let lines: Vec<(f32, f32)> =
+        playlist_zoom_mark_policy(marks, axis.beat_w, m.u(BEAT_W))
+            .into_iter()
+            .map(|(tick, w)| (m.round_px(axis.x(tick)) - (w / 2.0).floor() * px, w * px))
+            .collect();
     let grid_painter = painter.with_clip_rect(painter.clip_rect().intersect(grid));
     for &(ref track, top) in tracks {
         // A 1-px `background` gap under each row.
@@ -3680,6 +3760,53 @@ mod tests {
     }
 
     #[test]
+    fn playlist_bar_lines_are_capped_or_hidden_without_touching_secondary_marks() {
+        let bar_ticks = f64::from(TimeSig::default().bar_beats()) * f64::from(PPQ);
+        let original_secondary = vec![(bar_ticks / 2.0, 2.0), (bar_ticks / 4.0, 1.0)];
+        let always = playlist_bar_line_policy(
+            0.0,
+            100.0 * bar_ticks,
+            original_secondary.clone(),
+            TimeSig::default(),
+            24,
+            true,
+        );
+        assert!(always.iter().filter(|(_, width)| *width == 4.0).count() <= 24);
+        assert!(always.contains(&(bar_ticks / 2.0, 2.0)));
+        assert!(always.contains(&(bar_ticks / 4.0, 1.0)));
+
+        let auto_hidden = playlist_bar_line_policy(
+            0.0,
+            100.0 * bar_ticks,
+            original_secondary.clone(),
+            TimeSig::default(),
+            24,
+            false,
+        );
+        assert_eq!(auto_hidden, original_secondary);
+
+        let auto_visible = playlist_bar_line_policy(
+            0.0,
+            20.0 * bar_ticks,
+            Vec::new(),
+            TimeSig::default(),
+            24,
+            false,
+        );
+        assert_eq!(auto_visible.iter().filter(|(_, width)| *width == 4.0).count(), 21);
+    }
+
+    #[test]
+    fn playlist_zoom_keeps_beats_and_bars_but_does_not_add_fine_subdivisions() {
+        let marks = vec![(0.0, 4.0), (24.0, 1.0), (48.0, 2.0), (72.0, 1.0)];
+        assert_eq!(playlist_zoom_mark_policy(marks.clone(), 1.2, 1.2), marks);
+        assert_eq!(
+            playlist_zoom_mark_policy(marks, 2.4, 1.2),
+            vec![(0.0, 4.0), (48.0, 2.0)]
+        );
+    }
+
+    #[test]
     fn the_rows_beat_lines_are_background_4_2_1_px_centred_on_marks_at_least_0_6_u_apart() {
         // 38.4 points a beat at U 32: half beats are 19.2 apart, 0.6 U, and quarters would be closer. Bars 4 px, beats
         // 2 px, half beats 1 px, each ⌊w/2⌋ px left of its mark rounded to the pixel grid. Drums' row (y TOP + 64, 63
@@ -3732,7 +3859,15 @@ mod tests {
         let out = egui::Context::default().run(egui::RawInput::default(), |ctx| {
             let panel = egui::CentralPanel::default().frame(egui::Frame::NONE);
             panel.show(ctx, |ui| {
-                paint_track_rows(ui.painter(), rect, 48.0, &tracks, axis, rows, &cx);
+                paint_track_rows(
+                    ui.painter(),
+                    rect,
+                    48.0,
+                    &tracks,
+                    axis,
+                    (rows.0, rows.1, rows.2, rows.3, 24, true),
+                    &cx,
+                );
             });
         });
         let mut lines: Vec<(f32, f32)> = (out.shapes.iter())

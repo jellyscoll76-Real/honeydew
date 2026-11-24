@@ -142,6 +142,7 @@ enum Kind {
     /// The output buffer target slider, with a native/default position at zero.
     BufferSize,
     WaveformGap,
+    BarLineLimit,
     McpPort,
     McpToken,
     McpStatus,
@@ -260,7 +261,7 @@ fn platform_row_visible(r: &Row, desktop: bool, web: bool) -> bool {
 
 /// Every row of the SETTINGS tab, in order.
 // The raw buffer slider is desktop-only; mobile has one fewer settings row.
-const ROWS: [Row; 78 + cfg!(desktop) as usize] = {
+const ROWS: [Row; 81 + cfg!(desktop) as usize] = {
     use Kind::*;
     [
         row("MIDI:", Header),
@@ -314,6 +315,12 @@ const ROWS: [Row; 78 + cfg!(desktop) as usize] = {
         ),
         row("Application:", Header),
         row("Edit:", Header),
+        row("Timeline Grid / Bar Lines:", Header),
+        row("Maximum visible bar lines", BarLineLimit),
+        row(
+            "Keep bar lines visible at every zoom level",
+            Toggle(|s| &mut s.playlist_bar_lines_always_visible),
+        ),
         row(
             "Show Playlist envelopes",
             Toggle(|s| &mut s.envelope_display.visible),
@@ -710,7 +717,12 @@ impl SettingsTab {
         }
         // Headers and the metronome row take the whole slot; the other rows are a control row, centred in it.
         let r = match row.kind {
-            Kind::Header | Kind::Level | Kind::Scaling | Kind::BufferSize | Kind::WaveformGap => {
+            Kind::Header
+            | Kind::Level
+            | Kind::Scaling
+            | Kind::BufferSize
+            | Kind::WaveformGap
+            | Kind::BarLineLimit => {
                 slot
             }
             _ => Rect::from_center_size(slot.center(), vec2(slot.width(), m.u(ROW_H))),
@@ -936,6 +948,23 @@ impl SettingsTab {
                     format!("{} rows", (v * 40.0).round() as u8)
                 });
                 s.vocal_waveform_offset_y = (value.clamp(0.0, 1.0) * 40.0).round() as u8;
+            }
+            Kind::BarLineLimit => {
+                label(ui, before(button_rect), FontSize::Pt10);
+                let field = Rect::from_min_size(
+                    button_rect.right_center() - vec2(m.u(4.5), m.u(BUTTON_H / 2.0)),
+                    vec2(m.u(4.5), m.u(BUTTON_H)),
+                );
+                ui.scope(|ui| {
+                    ui.style_mut().override_font_id = Some(m.font_id(FontSize::Pt12));
+                    ui.put(field, DragValue::new(&mut s.playlist_bar_line_limit).range(1..=256));
+                });
+                crate::ui::tooltip::tip(
+                    ui,
+                    field,
+                    "Visual-only cap for main Playlist bar lines. The default is 24; changing it never changes clip timing or snapping.",
+                    None,
+                );
             }
             Kind::BufferSize => {
                 let (line, body) = r.split_top_bottom_at_y(r.top() + m.u(LEVEL_LABEL_H));
@@ -1574,6 +1603,9 @@ mod tests {
                 "Show information buttons",
                 "Application:",
                 "Edit:",
+                "Timeline Grid / Bar Lines:",
+                "Maximum visible bar lines",
+                "Keep bar lines visible at every zoom level",
                 "Show Playlist envelopes",
                 "VOL / PAN colors",
                 "Piano Roll Note Style:",
