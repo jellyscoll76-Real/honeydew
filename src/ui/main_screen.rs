@@ -2504,7 +2504,7 @@ fn playlist_grid_lines(
         let first_beat = (t0.max(0.0) / f64::from(PPQ)).ceil() as i64;
         let last_beat = (t1 / f64::from(PPQ)).floor() as i64;
         for beat in first_beat..=last_beat {
-            if (beat as f64).rem_euclid(f64::from(sig.bar_beats())) == 0.0 {
+            if beat.rem_euclid(i64::from(sig.bar_beats())) == 0 {
                 continue;
             }
             lines.push((beat as f64 * f64::from(PPQ), 2.0));
