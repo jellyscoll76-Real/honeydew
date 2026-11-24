@@ -20,6 +20,10 @@ crate-type = ["cdylib", "rlib"]
 name = "banaforge-native"
 path = "src/main.rs"
 
+[features]
+# Keeps eframe's native settings storage separate for the standalone Android application ID.
+standalone-android = []
+
 [dependencies]
 banaforge-audio = { path = "crates/audio" }
 serde = { version = "1.0.229", features = ["derive"] }

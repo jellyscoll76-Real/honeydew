@@ -15,10 +15,17 @@ REQUIRED = (
     "ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD",
     "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD",
 )
+STANDALONE_REQUIRED = (
+    "BANAFORGE_STANDALONE_KEYSTORE_BASE64",
+    "BANAFORGE_STANDALONE_KEYSTORE_PASSWORD",
+    "BANAFORGE_STANDALONE_KEY_ALIAS",
+    "BANAFORGE_STANDALONE_KEY_PASSWORD",
+)
 
 
-def prepare(destination, certificate_file):
-    missing = [name for name in REQUIRED if not os.environ.get(name)]
+def prepare(destination, certificate_file, standalone=False):
+    required = STANDALONE_REQUIRED if standalone else REQUIRED
+    missing = [name for name in required if not os.environ.get(name)]
     if missing:
         raise ValueError("Release signing unavailable: configure " + ", ".join(missing)
                          + ". No temporary release key will be generated.")
@@ -26,7 +33,7 @@ def prepare(destination, certificate_file):
     if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
         raise ValueError("A reviewed SHA-256 release certificate pin is required.")
     try:
-        key = base64.b64decode(os.environ[REQUIRED[0]], validate=True)
+        key = base64.b64decode(os.environ[required[0]], validate=True)
     except (ValueError, base64.binascii.Error):
         raise ValueError("The configured keystore is not valid base64.") from None
     destination = Path(destination)
@@ -37,8 +44,8 @@ def prepare(destination, certificate_file):
             stream.write(key)
         result = subprocess.run([
             "keytool", "-exportcert", "-keystore", str(destination),
-            "-storepass:env", "ANDROID_KEYSTORE_PASSWORD",
-            "-alias", os.environ["ANDROID_KEY_ALIAS"],
+            "-storepass:env", required[1],
+            "-alias", os.environ[required[2]],
         ], capture_output=True, check=False)
         if result.returncode:
             raise ValueError("Cannot read the configured signing certificate; check the stored key configuration.")
@@ -55,14 +62,21 @@ def prepare(destination, certificate_file):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keystore", required=True)
-    parser.add_argument("--certificate", default="android/release-certificate.sha256")
+    parser.add_argument("--standalone", action="store_true",
+                        help="use only the standalone-specific signing secrets and certificate pin")
+    parser.add_argument("--certificate")
     args = parser.parse_args()
+    certificate = args.certificate or (
+        "android/standalone-release-certificate.sha256" if args.standalone
+        else "android/release-certificate.sha256"
+    )
     try:
-        digest = prepare(args.keystore, args.certificate)
+        digest = prepare(args.keystore, certificate, standalone=args.standalone)
     except (OSError, ValueError):
         # Deliberately don't echo tool exceptions/secret-bearing inputs.
-        print("::error::Release signing validation failed. Required: the existing release keystore, "
-              "all four signing secrets and its matching approved certificate pin. "
+        identity = "standalone" if args.standalone else "existing"
+        print(f"::error::Release signing validation failed. Required: the {identity} signing identity, "
+              "all four matching secrets and its reviewed certificate pin. "
               "No replacement key or APK was generated.")
         return 1
     print("Release certificate SHA-256: " + digest)

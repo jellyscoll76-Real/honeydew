@@ -64,6 +64,13 @@ android {
             keyAlias = providers.environmentVariable('ANDROID_KEY_ALIAS').orNull
             keyPassword = providers.environmentVariable('ANDROID_KEY_PASSWORD').orNull
         }
+        // Standalone has a separate secret namespace and no fallback to the legacy release signer.
+        standaloneRelease {
+            storeFile = file(providers.environmentVariable('BANAFORGE_STANDALONE_KEYSTORE_FILE').orNull ?: 'missing-standalone-keystore.jks')
+            storePassword = providers.environmentVariable('BANAFORGE_STANDALONE_KEYSTORE_PASSWORD').orNull
+            keyAlias = providers.environmentVariable('BANAFORGE_STANDALONE_KEY_ALIAS').orNull
+            keyPassword = providers.environmentVariable('BANAFORGE_STANDALONE_KEY_PASSWORD').orNull
+        }
     }
 
     buildTypes {
@@ -76,6 +83,15 @@ android {
         }
         release {
             signingConfig = signingConfigs.release
+            minifyEnabled = true
+            shrinkResources = true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        // Do not initWith `release`: explicit standalone identity, application ID, and signer prevent silent inheritance.
+        standaloneRelease {
+            applicationIdSuffix = '.standalone'
+            resValue 'string', 'app_name', 'BanaForge Standalone'
+            signingConfig = signingConfigs.standaloneRelease
             minifyEnabled = true
             shrinkResources = true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -115,15 +131,28 @@ android {
 }
 
 def nativeBuildDir = layout.buildDirectory.get().asFile
+def requestedGradleTasks = gradle.startParameter.taskNames.collect { it.tokenize(':').last().toLowerCase() }
+def standaloneTaskRequested = requestedGradleTasks.any { it.contains('standalonerelease') }
+def ambiguousAllVariantsTask = requestedGradleTasks.any { it in ['assemble', 'build'] }
+def standaloneNativeMarker = new File(nativeBuildDir, 'standalone-android.variant')
 def expectedInputs = (isBaseApk ? [] : ['assets/content/index.json']) +
     activeAbis.collect { abi -> "jniLibs/${abi}/libbanaforge.so" }
 
 tasks.register('verifyNativeInputs') {
     doLast {
+        if (ambiguousAllVariantsTask) {
+            throw new GradleException('Build one Android variant at a time with tools/android-dist.sh; native inputs are variant-specific.')
+        }
         for (path in expectedInputs) {
             if (!new File(nativeBuildDir, path).isFile()) {
                 throw new GradleException("Missing ${path}; build with tools/android-dist.sh")
             }
+        }
+        if (standaloneTaskRequested != standaloneNativeMarker.isFile()) {
+            throw new GradleException('Native library feature does not match the selected package variant; rebuild with tools/android-dist.sh.')
+        }
+        if (standaloneNativeMarker.isFile() && standaloneNativeMarker.text.trim() != 'dev.daijro.banaforge.standalone') {
+            throw new GradleException('Standalone native marker has an unexpected application ID.')
         }
     }
 }

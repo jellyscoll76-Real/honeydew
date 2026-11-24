@@ -43,6 +43,12 @@ const SOUNDS_TAGS: &str =
 /// An automatic check asks GitHub at most this often, in seconds; `Check now` at most once a [`MANUAL_EVERY`].
 const CHECK_EVERY: u64 = 6 * 3600;
 const MANUAL_EVERY: u64 = 60;
+
+/// Whether this binary has an APK feed that matches its package identity. The standalone test lineage has no feed yet.
+pub(crate) const fn apk_updates_enabled() -> bool {
+    !cfg!(feature = "standalone-android")
+}
+
 /// The last answer, in the app data folder.
 pub const CACHE: &str = "update.json";
 /// What a transfer without a network fails with.
@@ -268,9 +274,54 @@ fn store(cache: &Cache) {
     }
 }
 
+/// The standalone package has no standalone APK feed yet. Check only the independent sound-library tags; never fetch or
+/// offer the legacy package's APK as an update for the side-by-side installation.
+fn check_standalone_sounds(auto: bool) {
+    let every = if auto { CHECK_EVERY } else { MANUAL_EVERY };
+    if let Some(kept) = cache().as_ref().filter(|c| now() < c.checked + every) {
+        let tag = format!("sounds-{}", kept.sounds);
+        let sounds = newest_sounds([tag.as_str()], SHIPPED_RELEASE);
+        with(|s| {
+            s.latest = None;
+            s.check_failed = None;
+            s.sounds_latest = Some(sounds);
+        });
+        return;
+    }
+    if with(|s| std::mem::replace(&mut s.checking, true)) {
+        return;
+    }
+    thread::spawn(move || {
+        #[derive(Deserialize)]
+        struct Tag {
+            #[serde(rename = "ref")]
+            name: String,
+        }
+        let tags = api::<Vec<Tag>>(SOUNDS_TAGS).unwrap_or_default();
+        let tags = tags.iter().map(|t| t.name.trim_start_matches("refs/tags/"));
+        let sounds = newest_sounds(tags, SHIPPED_RELEASE);
+        store(&Cache {
+            checked: now(),
+            release: Release::default(),
+            sounds: sounds.clone(),
+            announced: String::new(),
+        });
+        with(|s| {
+            s.checking = false;
+            s.latest = None;
+            s.check_failed = None;
+            s.sounds_latest = Some(sounds);
+        });
+    });
+}
+
 /// Learns the latest release on a worker, unless a check runs: from the kept answer while it is younger than
 /// [`CHECK_EVERY`] (`auto`, at start) or [`MANUAL_EVERY`] (`Check now`), else from GitHub.
 pub fn check(auto: bool) {
+    if !apk_updates_enabled() {
+        check_standalone_sounds(auto);
+        return;
+    }
     let every = if auto { CHECK_EVERY } else { MANUAL_EVERY };
     let kept = cache();
     if let Some(kept) = kept.as_ref().filter(|c| now() < c.checked + every) {
@@ -352,6 +403,9 @@ pub fn announce() -> Option<String> {
 
 /// Downloads this build's download of the latest release on a worker, then installs it as the module docs say.
 pub fn install() {
+    if !apk_updates_enabled() {
+        return;
+    }
     let asset = with(|s| s.latest.as_ref().and_then(Release::asset).cloned());
     let Some(asset) = asset else { return };
     let size = asset.size;
@@ -672,6 +726,11 @@ fn transfer(url: &str, to: &Path, grown: &dyn Fn(u64)) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apk_update_feed_matches_the_compiled_package_lineage() {
+        assert_eq!(apk_updates_enabled(), !cfg!(feature = "standalone-android"));
+    }
 
     #[test]
     fn the_sound_library_offered_is_the_newest_this_build_reads_and_never_older_than_its_own() {

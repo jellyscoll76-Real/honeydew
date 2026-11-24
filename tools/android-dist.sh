@@ -13,12 +13,21 @@ fi
 
 variant=debug
 task=assembleDebug
+standalone=0
+release_mode=
 base=
 abi_mode=all
 profile=android-release
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --release) variant=release; task=assembleRelease ;;
+        --release)
+            [ -z "$release_mode" ] || { echo 'choose only one release identity' >&2; exit 2; }
+            release_mode=legacy; variant=release; task=assembleRelease
+            ;;
+        --standalone-release)
+            [ -z "$release_mode" ] || { echo 'choose only one release identity' >&2; exit 2; }
+            release_mode=standalone; standalone=1; variant=standaloneRelease; task=assembleStandaloneRelease
+            ;;
         --base) base=-base ;;
         --abi)
             shift
@@ -28,7 +37,7 @@ while [ "$#" -gt 0 ]; do
         --abi=*) abi_mode=${1#--abi=} ;;
         --profile=*) profile=${1#--profile=} ;;
         *)
-            echo "usage: tools/android-dist.sh [--release] [--base] [--abi arm64-v8a|armeabi-v7a|all]" >&2
+            echo "usage: tools/android-dist.sh [--release|--standalone-release] [--base] [--abi arm64-v8a|armeabi-v7a|all]" >&2
             exit 2
             ;;
     esac
@@ -62,6 +71,11 @@ if [ "$variant" = release ]; then
     [ -f "$ANDROID_KEYSTORE_FILE" ] || { echo 'release keystore does not exist' >&2; exit 1; }
     ANDROID_KEYSTORE_FILE=$(cd "$(dirname "$ANDROID_KEYSTORE_FILE")" && pwd)/$(basename "$ANDROID_KEYSTORE_FILE")
     export ANDROID_KEYSTORE_FILE
+elif [ "$standalone" = 1 ]; then
+    : "${BANAFORGE_STANDALONE_KEYSTORE_BASE64:?configure the standalone keystore in the secure secret store}"
+    : "${BANAFORGE_STANDALONE_KEYSTORE_PASSWORD:?configure the standalone store password in the secure secret store}"
+    : "${BANAFORGE_STANDALONE_KEY_ALIAS:?configure the standalone key alias in the secure secret store}"
+    : "${BANAFORGE_STANDALONE_KEY_PASSWORD:?configure the standalone key password in the secure secret store}"
 fi
 : "${ANDROID_HOME:?set ANDROID_HOME to the Android SDK directory}"
 export ANDROID_SDK_ROOT=$ANDROID_HOME
@@ -71,6 +85,14 @@ for tool in cargo python3 unzip java keytool; do
     command -v "$tool" >/dev/null || { echo "needs $tool on PATH" >&2; exit 1; }
 done
 
+if [ "$standalone" = 1 ]; then
+    signing_tmp=$(mktemp -d "${TMPDIR:-/tmp}/banaforge-standalone-signing.XXXXXX")
+    trap 'rm -rf "$signing_tmp"' EXIT
+    trap 'exit 1' HUP INT TERM
+    export BANAFORGE_STANDALONE_KEYSTORE_FILE="$signing_tmp/standalone.jks"
+    python3 tools/prepare_android_signing.py --standalone --keystore "$BANAFORGE_STANDALONE_KEYSTORE_FILE"
+fi
+
 mkdir -p "${CARGO_TARGET_DIR:-target}"
 export CARGO_TARGET_DIR=$(cd "${CARGO_TARGET_DIR:-target}" && pwd)
 export BANAFORGE_ANDROID_BUILD_DIR=$CARGO_TARGET_DIR/android
@@ -78,6 +100,7 @@ export BANAFORGE_ANDROID_ABIS=$abis_csv
 export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4}
 mkdir -p "$BANAFORGE_ANDROID_BUILD_DIR/assets" "$BANAFORGE_ANDROID_BUILD_DIR/jniLibs"
 rm -rf "$BANAFORGE_ANDROID_BUILD_DIR/assets/content" "$BANAFORGE_ANDROID_BUILD_DIR/jniLibs"
+rm -f "$BANAFORGE_ANDROID_BUILD_DIR/standalone-android.variant"
 mkdir -p "$BANAFORGE_ANDROID_BUILD_DIR/jniLibs"
 export BANAFORGE_ANDROID_BASE=$base
 if [ -z "$base" ]; then
@@ -89,18 +112,25 @@ fi
 
 # signalsmith-stretch's C++ links libc++_shared.so, which the APK has to ship beside libbanaforge.so.
 # Uses [profile.android-release] (ThinLTO + codegen-units=1 + strip="symbols") and 16 KB ELF page alignment.
+set -- rustc --profile "$profile" --locked --lib
+if [ "$standalone" = 1 ]; then
+    set -- "$@" --features standalone-android
+fi
 case "$abi_mode" in
     all)
         cargo ndk -t arm64-v8a -t armeabi-v7a --platform 26 --link-libcxx-shared \
             -o "$BANAFORGE_ANDROID_BUILD_DIR/jniLibs" \
-            rustc --profile "$profile" --locked --lib -- -C link-arg=-Wl,-z,max-page-size=16384
+            "$@" -- -C link-arg=-Wl,-z,max-page-size=16384
         ;;
     arm64-v8a|armeabi-v7a)
         cargo ndk -t "$abi_mode" --platform 26 --link-libcxx-shared \
             -o "$BANAFORGE_ANDROID_BUILD_DIR/jniLibs" \
-            rustc --profile "$profile" --locked --lib -- -C link-arg=-Wl,-z,max-page-size=16384
+            "$@" -- -C link-arg=-Wl,-z,max-page-size=16384
         ;;
 esac
+if [ "$standalone" = 1 ]; then
+    printf '%s\n' 'dev.daijro.banaforge.standalone' > "$BANAFORGE_ANDROID_BUILD_DIR/standalone-android.variant"
+fi
 
 debug_keystore=$PWD/android/debug.keystore
 if [ "$variant" = debug ] && [ ! -f "$debug_keystore" ]; then
@@ -121,8 +151,13 @@ android/gradlew -p android --no-daemon "$task"
 apk=$BANAFORGE_ANDROID_BUILD_DIR/outputs/apk/$variant/app-$variant.apk
 "$sdk_tools/apksigner" verify "$apk"
 if [ "$variant" = release ]; then
-    # Local releases obey the same signer/package/version gate as CI releases.
+    # Local legacy releases obey the existing signer/package/version gate.
     python3 tools/verify_android_update.py "$apk" --tools "$sdk_tools" --abis "$abi_mode"
+elif [ "$standalone" = 1 ]; then
+    # Never consult the legacy package ID, key secrets, or certificate pin for the standalone variant.
+    python3 tools/verify_android_standalone.py "$apk" --tools "$sdk_tools" --abis "$abi_mode" \
+        --previous-identity android/standalone-release-baseline.json \
+        --report "$CARGO_TARGET_DIR/standalone-android-identity.json"
 fi
 "$sdk_tools/zipalign" -c -P 16 4 "$apk"
 # Validate real machine code and linker/JNI dependencies, never just manifest declarations.
@@ -160,6 +195,10 @@ PY
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
 suffix=
 [ "$variant" = release ] || suffix=-debug
-out=$CARGO_TARGET_DIR/banaforge-android-$version-$abi_suffix$base$suffix.apk
+if [ "$standalone" = 1 ]; then
+    out=$CARGO_TARGET_DIR/banaforge-android-standalone-$version-$abi_suffix$base.apk
+else
+    out=$CARGO_TARGET_DIR/banaforge-android-$version-$abi_suffix$base$suffix.apk
+fi
 cp "$apk" "$out"
 echo "wrote $out"
