@@ -574,6 +574,27 @@ impl Clips {
         }
 
         // The clips, the selected one last: on top, and first to take the pointer.
+        #[cfg(debug_assertions)]
+        let diagnostic_started = std::time::Instant::now();
+        #[cfg(debug_assertions)]
+        let total_clip_count: usize = app
+            .song
+            .channels
+            .iter()
+            .flat_map(|channel| &channel.lanes)
+            .map(|lane| lane.clips.len())
+            .sum();
+        #[cfg(debug_assertions)]
+        let examined_clip_count: usize = rows
+            .iter()
+            .map(|&(channel, lane, _)| {
+                app.song
+                    .channels
+                    .get(channel)
+                    .and_then(|channel| channel.lanes.get(lane))
+                    .map_or(0, |lane| lane.clips.len())
+            })
+            .sum();
         let mut blocks: Vec<(ClipRef, Rect)> = rows
             .iter()
             .flat_map(|&(channel, lane, row)| {
@@ -594,6 +615,15 @@ impl Clips {
             .filter(|(_, rect)| rect.intersects(grid))
             .collect();
         blocks.sort_by_key(|&(r, _)| Some(r) == self.selected);
+        #[cfg(debug_assertions)]
+        crate::ui::playlist_diagnostics::begin_playlist_frame(
+            total_clip_count,
+            examined_clip_count,
+            blocks.len(),
+            diagnostic_started.elapsed(),
+        );
+        #[cfg(debug_assertions)]
+        let mut diagnostic_painted = 0;
         if (!self.row.owns_pointer(pos) || self.envelopes.busy())
             && self
                 .envelopes
@@ -619,11 +649,17 @@ impl Clips {
         let current = self.current_clip(app);
         // The current clip's outline goes over every row and clip, after them all ([`paint_outline`]).
         let mut outline = None;
+        #[cfg(debug_assertions)]
+        let diagnostic_paint_started = std::time::Instant::now();
         for &(r, rect) in &blocks {
             // A clip being recorded shows only as its take's live bar (with its notes live: [`paint_live`]).
             let live =
                 |t: &LiveTake| (t.channel, t.lane, t.clip) == (r.channel, r.lane, Some(r.id));
             if let Some(clip) = find(app.song, r).filter(|_| !takes.iter().any(live)) {
+                #[cfg(debug_assertions)]
+                {
+                    diagnostic_painted += 1;
+                }
                 let silent =
                     preview.is_some_and(|k| (k.channel, k.lane, k.id) != (r.channel, r.lane, r.id));
                 let wave = audio_wave(&mut app.audio.samples, app.files, clip, tempo);
@@ -678,6 +714,11 @@ impl Clips {
                 landed = Some(Target::Clip(r, Part::Body));
             }
         }
+        #[cfg(debug_assertions)]
+        crate::ui::playlist_diagnostics::finish_clip_paint(
+            diagnostic_painted,
+            diagnostic_paint_started.elapsed(),
+        );
 
         for take in takes {
             let row = rows
@@ -918,6 +959,8 @@ impl Clips {
             .show(ui, "clip_button", sel, view, &labels, &app.cx);
         let button = clicked.and_then(|(i, center)| self.act(app, i, center, snap));
         self.follow_drag(ui, app, axis, drag_unit, rows);
+        #[cfg(debug_assertions)]
+        crate::ui::playlist_diagnostics::paint(&painter, grid, &app.cx);
         // A handle let go wobbles from the growth it had.
         if self.touch.is_none() && self.drag.is_none() {
             let let_go = self.held.take().map(|(part, t)| (part, now, grow(now - t)));
@@ -2232,9 +2275,13 @@ fn paint_clip(
             };
             sample(&stops, t).to_color32()
         };
+        #[cfg(debug_assertions)]
+        let pattern_started = std::time::Instant::now();
         notes(&painter, clip, steps, area, axis, ink, m);
         let ink = sample(&stops, if dim { 0.0 } else { CURVE_TINT }).to_color32();
         automation(&painter, clip, area, axis, ink, m);
+        #[cfg(debug_assertions)]
+        crate::ui::playlist_diagnostics::pattern_work(pattern_started.elapsed());
         if let Some(wave) = wave {
             waveform(&painter, clip, wave, area, axis, ink, m);
         }
@@ -2621,8 +2668,12 @@ fn stereo_wave_mesh(
         cache.push_back(hit);
         Some(mesh)
     }) {
+        #[cfg(debug_assertions)]
+        crate::ui::playlist_diagnostics::waveform_mesh(true);
         return mesh;
     }
+    #[cfg(debug_assertions)]
+    crate::ui::playlist_diagnostics::waveform_mesh(false);
     let mut mesh = Mesh::default();
     let stride = quality.stride(
         waveform_column_stride(

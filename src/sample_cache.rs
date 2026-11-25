@@ -656,8 +656,12 @@ impl SampleCache {
         // Rendering the same file in many clips must not repeat the decode/ref
         // lookup (or construct a reader-backed loading plan) on every UI frame.
         if let Some(waveform) = self.waveforms.get(&key) {
+            #[cfg(debug_assertions)]
+            crate::ui::playlist_diagnostics::waveform_source(true);
             return Some(waveform.clone());
         }
+        #[cfg(debug_assertions)]
+        crate::ui::playlist_diagnostics::waveform_source(false);
         let data = self.load_slot(slot, read)?;
         Some(
             (self.waveforms.entry(key))

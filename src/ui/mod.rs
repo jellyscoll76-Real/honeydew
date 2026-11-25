@@ -67,6 +67,9 @@ pub mod midi_import;
 pub mod dialog;
 // The performance monitor's data and drawing: the PROJECT block and the floating overlay.
 pub mod performance;
+// Debug-only counters and scoped timings for Playlist performance investigations.
+#[cfg(debug_assertions)]
+pub mod playlist_diagnostics;
 // The keymap's editing and zoom actions in the editor grids.
 pub mod edit_keys;
 

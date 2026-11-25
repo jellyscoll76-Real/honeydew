@@ -1133,6 +1133,8 @@ impl PianoRoll {
         song: &mut Song,
         opts: &RollOptions,
     ) -> Vec<PianoRollAction> {
+        #[cfg(debug_assertions)]
+        let diagnostic_started = std::time::Instant::now();
         let m = cx.m;
         let u = m.u(1.0);
         let bpb = song.time_sig.bar_beats();
@@ -1619,6 +1621,8 @@ impl PianoRoll {
         self.seen_vocal_notes = self
             .clip(song)
             .map_or_else(Vec::new, |clip| clip.file.vocal_notes.clone());
+        #[cfg(debug_assertions)]
+        crate::ui::playlist_diagnostics::piano_roll_work(diagnostic_started.elapsed());
         actions
     }
 

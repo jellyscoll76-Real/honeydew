@@ -452,9 +452,8 @@ fn curve(ui: &Ui, cx: &UiCtx, plot: Rect, p: &Performance) {
     }
 }
 
-/// #89: the performance overlay's count, over windows of [`WINDOW_S`]: the frames a second while the app draws one
-/// after another (each within [`BUSY_S`] of the last: at rest it draws nothing, which is no lag), and the mean time
-/// the app takes to make one.
+/// #89: the performance overlay's count, over windows of [`WINDOW_S`]: the rate of consecutive frames whose intervals
+/// are within [`BUSY_S`] (no rate is shown when no such pair occurs), and the mean time the app takes to make one.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameCount {
     /// The window: when it began (egui time), the last frame's time, the frames that came within [`BUSY_S`] of the one
@@ -465,15 +464,22 @@ pub struct FrameCount {
     busy_s: f64,
     frames: u32,
     work_s: f64,
-    /// The last window's frames a second (`None`: at rest) and mean frame time in ms.
+    /// The last window's frames a second (`None`: no sufficiently close pair of frames) and mean app frame work in ms.
     pub shown: (Option<f32>, f32),
+    /// Debug diagnostic: maximum app-frame work and maximum gap between app-frame starts in the last window, ms.
+    #[cfg(debug_assertions)]
+    pub shown_detail: (f32, f32),
+    #[cfg(debug_assertions)]
+    max_work_ms: f32,
+    #[cfg(debug_assertions)]
+    max_gap_ms: f32,
     /// Where a drag has the overlay, until it ends.
     dragged: Option<Pos2>,
 }
 
 /// The overlay counts over this long, in seconds.
 const WINDOW_S: f64 = 0.5;
-/// Frames further apart than this are the app at rest, not a slow frame rate.
+/// Gaps beyond this do not contribute to the displayed consecutive-frame rate.
 const BUSY_S: f64 = 0.25;
 
 impl FrameCount {
@@ -482,16 +488,31 @@ impl FrameCount {
         if let Some(last) = self.last.filter(|&l| now - l <= BUSY_S) {
             (self.busy, self.busy_s) = (self.busy + 1, self.busy_s + (now - last));
         }
+        #[cfg(debug_assertions)]
+        {
+            let work_ms = (work_s * 1000.0) as f32;
+            let gap_ms = self
+                .last
+                .map_or(0.0, |last| ((now - last).max(0.0) * 1000.0) as f32);
+            self.max_work_ms = self.max_work_ms.max(work_ms);
+            self.max_gap_ms = self.max_gap_ms.max(gap_ms);
+        }
         (self.last, self.frames, self.work_s) = (Some(now), self.frames + 1, self.work_s + work_s);
         if now - self.start >= WINDOW_S {
             let fps = (self.busy > 0).then(|| (f64::from(self.busy) / self.busy_s) as f32);
             self.shown = (fps, (self.work_s / f64::from(self.frames) * 1e3) as f32);
+            #[cfg(debug_assertions)]
+            {
+                self.shown_detail = (self.max_work_ms, self.max_gap_ms);
+                self.max_work_ms = 0.0;
+                self.max_gap_ms = 0.0;
+            }
             (self.start, self.busy, self.busy_s, self.frames, self.work_s) = (now, 0, 0.0, 0, 0.0);
         }
     }
 }
 
-/// The overlay's lines: `60 FPS  4.2 ms` (`- FPS` at rest), and the audio's `CPU 12 %  Underruns 0`.
+/// The overlay's lines: `60 FPS  4.2 ms` (dash when no consecutive frame pair qualifies), and audio `CPU 12 %  Underruns 0`.
 pub fn overlay_lines(count: &FrameCount, p: &Performance) -> [String; 2] {
     let (fps, ms) = count.shown;
     let fps = fps.map_or("-".to_owned(), |f| format!("{f:.0}"));
@@ -519,11 +540,26 @@ pub fn overlay(
     count.frame(now, work_s);
     let (m, c) = (cx.m, &cx.theme.colors);
     let font = m.font_id(FontSize::Pt8);
+    #[cfg(debug_assertions)]
+    let mut lines: Vec<_> = overlay_lines(&count, p)
+        .map(|l| ctx.fonts_mut(|f| f.layout_no_wrap(l, font.clone(), Color32::PLACEHOLDER)))
+        .into_iter()
+        .collect();
+    #[cfg(not(debug_assertions))]
     let lines = overlay_lines(&count, p)
         .map(|l| ctx.fonts_mut(|f| f.layout_no_wrap(l, font.clone(), Color32::PLACEHOLDER)));
+    #[cfg(debug_assertions)]
+    {
+        let (max_work_ms, max_gap_ms) = count.shown_detail;
+        let detail = format!(
+            "App work max {max_work_ms:.1} ms | frame interval max {max_gap_ms:.0} ms"
+        );
+        lines.push(ctx.fonts_mut(|f| f.layout_no_wrap(detail, font.clone(), Color32::PLACEHOLDER)));
+    }
     let pad = m.u(0.25);
-    let width = lines[0].size().x.max(lines[1].size().x);
-    let size = vec2(width, lines[0].size().y + lines[1].size().y) + Vec2::splat(2.0 * pad);
+    let width = lines.iter().map(|line| line.size().x).fold(0.0_f32, f32::max);
+    let height = lines.iter().map(|line| line.size().y).sum::<f32>();
+    let size = vec2(width, height) + Vec2::splat(2.0 * pad);
     // Inside the window, half a U off its edges.
     let room = ctx.content_rect().shrink(m.u(0.5));
     let span = (room.size() - size).max(Vec2::ZERO);
@@ -548,17 +584,19 @@ pub fn overlay(
             } else {
                 c.text
             };
-            let top = lines[0].size().y;
-            painter.galley(
-                rect.min + Vec2::splat(pad),
-                lines[0].clone(),
-                c.text.to_color32(),
-            );
-            painter.galley(
-                rect.min + vec2(pad, pad + top),
-                lines[1].clone(),
-                warn.to_color32(),
-            );
+            let mut y = rect.top() + pad;
+            for (index, line) in lines.iter().enumerate() {
+                painter.galley(
+                    pos2(rect.left() + pad, y),
+                    line.clone(),
+                    if index == 1 {
+                        warn.to_color32()
+                    } else {
+                        c.text.to_color32()
+                    },
+                );
+                y += line.size().y;
+            }
             if drag.dragged() {
                 let to = pos + drag.drag_delta();
                 count.dragged = Some(room.min + span * share(to));
@@ -594,6 +632,18 @@ mod tests {
             count.frame(2.0 + f64::from(i), 0.003);
         }
         assert_eq!(count.shown.0, None);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_frame_diagnostics_report_work_spikes_and_gaps_hidden_by_dash_fps() {
+        let mut count = FrameCount::default();
+        count.frame(0.0, 0.002);
+        count.frame(0.3, 0.040);
+        count.frame(0.6, 0.004);
+        assert_eq!(count.shown.0, None);
+        assert_eq!(count.shown_detail.0, 40.0);
+        assert!((count.shown_detail.1 - 300.0).abs() < 0.1);
     }
     use crate::metrics::{DEFAULT_UI_SCALE, Metrics};
     use crate::theme::{Theme, theme_by_id};
