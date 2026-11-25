@@ -684,9 +684,9 @@ mod playlist_visual_regressions {
                     assert!((area.center().y - row.center().y).abs() < 0.001);
                     assert!(area.left() > row.right() - m.u(ACTIVITY_W));
                     assert!((row.width() - m.u(ACTIVITY_W) - m.u(width)).abs() < 0.001);
-                    if height >= 1.0 {
-                        assert!(area.height() >= row.height() * 0.80);
-                    }
+                    let available_height = (row.height() - m.t() * 2.0).max(0.0);
+                    let expected_height = (row.height() * 0.84).min(available_height);
+                    assert!((area.height() - expected_height).abs() < 0.001);
                 }
             }
         }
