@@ -111,23 +111,25 @@ impl ActivityStyle {
             Self::SmallPill => {
                 let pill = Rect::from_center_size(
                     area.center(),
-                    vec2(area.width() * 0.42, area.height() * 0.72),
+                    vec2(area.width() * 0.42, area.height() * 0.84),
                 );
                 painter.rect_filled(pill, pill.width() * 0.5, color);
             }
             Self::DefaultSquare => {
-                painter.rect_filled(area, m.u(0.06), color);
+                let edge = area.width().min(area.height()) * 0.92;
+                let square = Rect::from_center_size(area.center(), vec2(edge, edge));
+                painter.rect_filled(square, m.u(0.06).min(edge * 0.12), color);
             }
             Self::FlmRectangle => {
                 let rectangle = Rect::from_center_size(
                     area.center(),
-                    vec2(area.width() * 0.48, area.height()),
+                    vec2(area.width() * 0.68, area.height() * 0.94),
                 );
-                painter.rect_filled(rectangle, m.u(0.025), color);
+                painter.rect_filled(rectangle, m.u(0.04).min(rectangle.width() * 0.08), color);
             }
             Self::Triangle => {
-                let half_w = area.width() * 0.42;
-                let half_h = area.height() * 0.42;
+                let half_w = area.width() * 0.46;
+                let half_h = area.height() * 0.45;
                 painter.add(Shape::convex_polygon(
                     vec![
                         pos2(area.center().x - half_w, area.center().y - half_h),
@@ -139,10 +141,9 @@ impl ActivityStyle {
                 ));
             }
             Self::ThreeCircles => {
-                let diameter = (area.width() * 0.38).min(area.height() * 0.24);
-                let radius = diameter * 0.5;
-                let step = diameter * 1.2;
-                for offset in [-step, 0.0, step] {
+                // Three large, overlapping lobes make one cloud/snowman-like silhouette, not three separate dots.
+                let radius = (area.width() * 0.46).min(area.height() * 0.23);
+                for offset in [-radius, 0.0, radius] {
                     painter.circle_filled(
                         pos2(area.center().x, area.center().y + offset),
                         radius,
@@ -649,12 +650,14 @@ fn sub_slider(
 mod tests;
 
 /// Extra Playlist column width, including spacing on both sides of the light.
-pub(crate) const ACTIVITY_W: f32 = 0.95;
+pub(crate) const ACTIVITY_W: f32 = 1.7;
 fn activity_rect(row: Rect, m: &Metrics) -> Rect {
-    let edge = m.u(0.55).min((row.height() - m.t() * 2.0).max(0.0));
+    let width = m.u(ACTIVITY_W - 0.2);
+    // Fill most of a track row vertically, while keeping a device-pixel safety inset at its edges.
+    let height = (row.height() * 0.84).min((row.height() - m.t() * 2.0).max(0.0));
     Rect::from_center_size(
         pos2(row.right() - m.u(ACTIVITY_W * 0.5), row.center().y),
-        vec2(edge, edge),
+        vec2(width, height),
     )
 }
 
@@ -667,20 +670,23 @@ mod playlist_visual_regressions {
     use super::*;
     use crate::metrics::Metrics;
     #[test]
-    fn layout_regression_square_activity_gutter_preserves_control_room() {
-        for scale in [75, 100, 150, 200] {
+    fn activity_gutter_preserves_controls_and_scales_with_playlist_row_height() {
+        for scale in [60, 80, 100] {
             let m = Metrics::from_pixels_per_point(1.0, scale);
             for width in [1.5, 13.5] {
-                for height in [0.45, 2.0, 4.0] {
+                for height in [0.45, 1.0, 2.0, 4.0] {
                     let row = Rect::from_min_size(
                         pos2(0.0, 0.0),
                         vec2(m.u(width + ACTIVITY_W), m.u(height)),
                     );
-                    let lamp = activity_rect(row, &m);
-                    assert!(row.contains_rect(lamp));
-                    assert!((lamp.width() - lamp.height()).abs() < 0.001);
-                    assert!(lamp.left() > row.right() - m.u(ACTIVITY_W));
+                    let area = activity_rect(row, &m);
+                    assert!(row.contains_rect(area));
+                    assert!((area.center().y - row.center().y).abs() < 0.001);
+                    assert!(area.left() > row.right() - m.u(ACTIVITY_W));
                     assert!((row.width() - m.u(ACTIVITY_W) - m.u(width)).abs() < 0.001);
+                    if height >= 1.0 {
+                        assert!(area.height() >= row.height() * 0.80);
+                    }
                 }
             }
         }
@@ -689,10 +695,10 @@ mod playlist_visual_regressions {
     }
 
     #[test]
-    fn every_activity_style_is_bounded_at_small_and_normal_row_heights_and_ui_scales() {
+    fn all_activity_styles_are_large_bounded_and_recognizable_at_60_80_100_percent() {
         for scale in [60, 80, 100] {
             let m = Metrics::from_pixels_per_point(1.0, scale);
-            for height in [0.45, 1.0, 2.0] {
+            for height in [0.45, 1.0, 2.0, 4.0] {
                 let row = Rect::from_min_size(
                     pos2(0.0, 0.0),
                     vec2(m.u(1.5 + ACTIVITY_W), m.u(height)),
@@ -713,18 +719,47 @@ mod playlist_visual_regressions {
                     } else {
                         1
                     };
-                    assert_eq!(output.shapes.len(), expected, "{style:?}, {scale}%, {height} U");
+                    assert_eq!(
+                        output.shapes.len(),
+                        expected,
+                        "{style:?}, {scale}%, {height} U"
+                    );
+                    let mut bounds = Rect::NOTHING;
+                    let mut blob_circles = Vec::new();
                     for clipped in output.shapes {
-                        let bounds = match clipped.shape {
+                        let shape_bounds = match clipped.shape {
                             Shape::Rect(shape) => shape.rect,
-                            Shape::Circle(shape) => Rect::from_center_size(
-                                shape.center,
-                                vec2(shape.radius * 2.0, shape.radius * 2.0),
-                            ),
+                            Shape::Circle(shape) => {
+                                if style == ActivityStyle::ThreeCircles {
+                                    blob_circles.push((shape.center, shape.radius));
+                                }
+                                Rect::from_center_size(
+                                    shape.center,
+                                    vec2(shape.radius * 2.0, shape.radius * 2.0),
+                                )
+                            }
                             Shape::Path(shape) => Rect::from_points(&shape.points),
                             shape => panic!("unexpected activity shape: {shape:?}"),
                         };
-                        assert!(area.expand(0.001).contains_rect(bounds));
+                        assert!(
+                            area.expand(0.001).contains_rect(shape_bounds),
+                            "{style:?}, {scale}%, {height} U"
+                        );
+                        bounds = bounds.union(shape_bounds);
+                    }
+                    // At normal (one- and two-U) rows, each design occupies most of the row, not a tiny badge.
+                    if (1.0..=2.0).contains(&height) {
+                        assert!(
+                            bounds.height() >= row.height() * 0.62,
+                            "{style:?}, {scale}%, {height} U"
+                        );
+                    }
+                    if style == ActivityStyle::ThreeCircles {
+                        assert_eq!(blob_circles.len(), 3);
+                        blob_circles.sort_by(|a, b| a.0.y.total_cmp(&b.0.y));
+                        for pair in blob_circles.windows(2) {
+                            assert!(pair[0].0.distance(pair[1].0) < pair[0].1 + pair[1].1);
+                        }
                     }
                 }
             }
